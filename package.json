@@ -14,8 +14,8 @@
   "contributes": {
     "commands": [
       {
-        "command": "obsidian-notes-and-snippets.helloWorld",
-        "title": "Hello World"
+        "command": "obsidian-notes-and-snippets.config",
+        "title": "AI Obsidian S&T: Config"
       }
     ]
   },
