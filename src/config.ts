@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { getNonce } from '../helpers.js';
+import { getNonce } from './helpers.js';
+import { VAULT_DIRS } from './config.constants.js';
 
 export function activateConfig(context: vscode.ExtensionContext) {
 	const configFilePath = path.join(context.globalStorageUri.fsPath, 'ai_obsidian_sandt.conf');
@@ -11,10 +12,13 @@ export function activateConfig(context: vscode.ExtensionContext) {
 			'config',
 			'AI Obsidian Snippets & Tools - CONFIG',
 			vscode.ViewColumn.One,
-			{ enableScripts: true }
+			{
+				enableScripts: true,
+				localResourceRoots: [vscode.Uri.joinPath(context.extensionUri, 'src')]
+			}
 		);
 
-		panel.webview.html = getWebviewContent();
+		panel.webview.html = getWebviewContent(panel.webview, context.extensionUri);
 
 		panel.webview.onDidReceiveMessage(async (message) => {
 			if (message.command === 'selectFolder') {
@@ -28,13 +32,19 @@ export function activateConfig(context: vscode.ExtensionContext) {
 				if (folderUri && folderUri[0]) {
 					const selectedFolderPath = folderUri[0].fsPath;
 
+					if (!validateObsidianVault(selectedFolderPath)) {
+						return;
+					}
+
+					const detectedDirs = detectVaultDirs(selectedFolderPath);
+
 					if (!fs.existsSync(context.globalStorageUri.fsPath)) {
 						fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
 					}
 
 					fs.writeFileSync(configFilePath, selectedFolderPath, 'utf8');
 					vscode.window.showInformationMessage(`Obsidian vault path saved: ${selectedFolderPath}`);
-					panel.webview.postMessage({ command: 'updatePath', path: selectedFolderPath });
+					panel.webview.postMessage({ command: 'updatePath', path: selectedFolderPath, dirs: detectedDirs });
 				} else {
 					vscode.window.showWarningMessage('No folder selected.');
 				}
@@ -50,21 +60,48 @@ export function activateConfig(context: vscode.ExtensionContext) {
 	context.subscriptions.push(disposable);
 }
 
-export function getWebviewContent() {
+function validateObsidianVault(vaultPath: string): boolean {
+	const obsidianDir = path.join(vaultPath, '.obsidian');
+	if (!fs.existsSync(obsidianDir)) {
+		vscode.window.showErrorMessage(
+			`"${vaultPath}" is not a valid Obsidian vault. The selected folder must contain a .obsidian directory.`
+		);
+		return false;
+	}
+	return true;
+}
+
+function detectVaultDirs(vaultPath: string): Array<{ name: string; active: boolean; exists: boolean }> {
+	return VAULT_DIRS.map((dir) => {
+		const dirPath = path.join(vaultPath, dir.name);
+		let exists = fs.existsSync(dirPath);
+		if (dir.active && !exists) {
+			fs.mkdirSync(dirPath, { recursive: true });
+			exists = true;
+		}
+		return { ...dir, exists };
+	});
+}
+
+export function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
 	const nonce = getNonce();
+	const styleUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'src', 'styles.css'));
+
 	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src 'unsafe-inline';">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
+  <link rel="stylesheet" href="${styleUri}">
   <title>AI Obsidian Snippets & Tools - CONFIG</title>
 </head>
 <body>
-  <div class="logo-row">
-    <span class="logo-icon">🔮</span>
-    <h1>Obsidian Notes &amp; Snippets</h1>
-  </div>
+  <div id="webviewContent">
+    <div class="logo-row">
+      <span class="logo-icon">🔮</span>
+      <h1>Obsidian Notes &amp; Snippets</h1>
+    </div>
   <p class="tagline">Bring your Obsidian vault into VS Code</p>
 
   <hr>
@@ -101,6 +138,7 @@ export function getWebviewContent() {
       }
     });
   </script>
+</div>
 </body>
 </html>`;
 }
