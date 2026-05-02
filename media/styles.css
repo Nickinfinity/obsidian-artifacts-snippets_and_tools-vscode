@@ -116,6 +116,10 @@ button:hover {
   background-color: var(--vscode-button-hoverBackground);
 }
 
+.vault-dir-section{
+  margin-top: 28px;
+}
+
 /* Vault Features section: hidden by default, shown when vault is selected */
 .directories-section {
   display: none;

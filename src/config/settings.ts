@@ -1,32 +1,27 @@
 import * as vscode from 'vscode';
-import * as fs from 'fs';
 import * as path from 'path';
 import { getNonce } from '../utils/helpers.js';
 import { validateObsidianVault, detectVaultDirs, createVaultDirectory, deleteVaultDirectory, isDirectoryEmpty } from '../services/vault.service.js';
-import { VAULT_DIRS } from '../types/constants.js';
+import { refreshVaultContext } from '../services/context.service.js';
 
 /**
  * Opens the configuration panel webview where users can:
  * 1. Select their Obsidian vault root directory
  * 2. Choose which vault feature directories to create/maintain
  *
- * The panel displays a folder selector, vault directory checkboxes, and handles
- * all user interactions including folder selection and directory toggling.
+ * Vault path and feature flags are persisted via the VS Code Settings API
+ * (`obsidianArtifacts.*`) so they sync across devices via Settings Sync.
  *
- * @param {vscode.ExtensionContext} context - Extension context providing global storage paths
- *                                            and extension URI for loading assets
+ * @param {vscode.ExtensionContext} context - Extension context providing the extension URI
+ *                                            for loading webview assets
  *
  * @example
  * openSettingsPanel(context);
- * // Opens a webview panel allowing vault configuration
  */
 export function openSettingsPanel(context: vscode.ExtensionContext) {
-	// Path to store the selected vault root directory persistently
-	const configFilePath = path.join(context.globalStorageUri.fsPath, 'ai_obsidian_sandt.conf');
-
 	const panel = vscode.window.createWebviewPanel(
 		'settings',
-		'AI Obsidian Snippets & Tools - Settings',
+		'Obsidian Artifacts: AI Snippets & Tools - Settings',
 		vscode.ViewColumn.One,
 		{
 			enableScripts: true,
@@ -40,7 +35,7 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 	panel.webview.onDidReceiveMessage(async (message) => {
 		// HANDLER: User clicked "Select Vault Folder" button
 		if (message.command === 'selectFolder') {
-			// Show native file picker dialog - users can only select folders, not files
+			// Show native file picker dialog — users can only select folders, not files
 			const folderUri = await vscode.window.showOpenDialog({
 				canSelectFiles: false,
 				canSelectFolders: true,
@@ -49,28 +44,25 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 			});
 
 			if (folderUri && folderUri[0]) {
-				// User selected a folder
 				const selectedFolderPath = folderUri[0].fsPath;
 
 				// Validate the selected path is a valid Obsidian vault (contains .obsidian/)
 				if (!validateObsidianVault(selectedFolderPath)) {
-					// validateObsidianVault shows error message to user, so just return early
 					return;
 				}
 
-				// Get the status of all predefined vault directories in this vault
-				const detectedDirs = detectVaultDirs(selectedFolderPath);
+				// Persist vault path to VS Code settings (global scope = synced across devices)
+				await vscode.workspace
+					.getConfiguration('obsidianArtifacts')
+					.update('vaultPath', selectedFolderPath, vscode.ConfigurationTarget.Global);
 
-				// Ensure global storage directory exists for saving the config file
-				if (!fs.existsSync(context.globalStorageUri.fsPath)) {
-					fs.mkdirSync(context.globalStorageUri.fsPath, { recursive: true });
-				}
-
-				// Persist the vault path to disk so it loads on extension restart
-				fs.writeFileSync(configFilePath, selectedFolderPath, 'utf8');
 				vscode.window.showInformationMessage(`Obsidian vault path saved: ${selectedFolderPath}`);
 
-				// Send vault path and directory status back to webview to update UI
+				// Refresh context keys so editor/terminal/explorer menus reflect the new vault state
+				refreshVaultContext();
+
+				// Send vault path and directory status to webview to update UI
+				const detectedDirs = detectVaultDirs(selectedFolderPath);
 				panel.webview.postMessage({ command: 'updatePath', path: selectedFolderPath, dirs: detectedDirs });
 			} else {
 				vscode.window.showWarningMessage('No folder selected.');
@@ -78,10 +70,9 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 		}
 		// HANDLER: User toggled a vault directory checkbox
 		else if (message.command === 'dirToggle') {
-			// Extract parameters from the checkbox toggle message
-			const vaultPath = message.vaultPath;
-			const dirName = message.dirName;
-			const isChecked = message.isChecked;
+			const vaultPath = message.vaultPath as string;
+			const dirName  = message.dirName  as string;
+			const isChecked = message.isChecked as boolean;
 
 			// Safety check: ensure a vault has been selected before allowing directory operations
 			if (!vaultPath) {
@@ -90,28 +81,40 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 			}
 
 			if (isChecked) {
-				// User checked the checkbox: CREATE the directory
+				// User enabled the feature: CREATE the directory on disk
 				createVaultDirectory(vaultPath, dirName);
 			} else {
-				// User unchecked the checkbox: DELETE the directory (if empty)
-				// First check if directory is empty to prevent accidental data loss
+				// User disabled the feature: DELETE the directory only if empty (safety guard)
 				if (!isDirectoryEmpty(path.join(vaultPath, dirName))) {
-					vscode.window.showWarningMessage(`Cannot delete "${dirName}" because it is not empty.`);
+					vscode.window.showWarningMessage(`Cannot disable "${dirName}" — directory is not empty.`);
 					return;
 				}
 				deleteVaultDirectory(vaultPath, dirName);
 			}
 
-			// Refresh the directory status in the UI after the operation
+			// Persist the feature flag to VS Code settings so it syncs across devices
+			await vscode.workspace
+				.getConfiguration('obsidianArtifacts')
+				.update(
+					`features.${dirName.toLowerCase()}`,
+					isChecked,
+					vscode.ConfigurationTarget.Global
+				);
+
+			// Refresh context keys and send updated directory status back to the webview
+			refreshVaultContext();
 			const updatedDirs = detectVaultDirs(vaultPath);
 			panel.webview.postMessage({ command: 'updateDirs', dirs: updatedDirs });
 		}
 	});
 
-	// On panel open, load any previously saved vault path from persistent storage
-	if (fs.existsSync(configFilePath)) {
-		const savedPath = fs.readFileSync(configFilePath, 'utf8');
-		// Detect directory status for the saved vault and send to webview
+	// On panel open, restore previously saved vault path from VS Code settings
+	const savedPath = vscode.workspace
+		.getConfiguration('obsidianArtifacts')
+		.get<string>('vaultPath', '')
+		.trim();
+
+	if (savedPath) {
 		const detectedDirs = detectVaultDirs(savedPath);
 		panel.webview.postMessage({ command: 'updatePath', path: savedPath, dirs: detectedDirs });
 	}
@@ -155,14 +158,14 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
   <!-- Load external stylesheet from extension media folder -->
   <link rel="stylesheet" href="${styleUri}">
-  <title>AI Obsidian Snippets & Tools - CONFIG</title>
+  <title>Obsidian Artifacts: AI Snippets & Tools - CONFIG</title>
 </head>
 <body>
   <div id="webviewContent">
     <!-- Header: extension logo and title -->
     <div class="logo-row">
       <span class="logo-icon">🔮</span>
-      <h1>Obsidian Notes &amp; Snippets</h1>
+      <h1>Obsidian Artifacts: AI Snippets &amp; Tools</h1>
     </div>
     <p class="tagline">Bring your Obsidian vault into VS Code</p>
 
@@ -174,18 +177,6 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
       <p>To get started, point the extension to your vault's root folder — the directory that contains your <code>.obsidian/</code> folder. Your selection is saved locally and persists across sessions.</p>
     </div>
 
-    <!-- Vault Location section: shows selected path and folder picker button -->
-    <p class="section-label">Vault Location</p>
-
-    <div class="vault-card">
-      <span class="vault-icon">📁</span>
-      <span id="folderPath">No vault selected</span>
-    </div>
-
-    <button id="selectFolderButton">
-      <span>Select Vault Folder</span>
-    </button>
-
     <!-- Vault Features section: shown only after vault selection -->
     <!-- Contains checkbox list for directory management -->
     <div id="directoriesSection" class="directories-section">
@@ -194,6 +185,21 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
       <!-- Directory checkboxes will be rendered here by JavaScript -->
       <div id="directoryList" class="directory-list"></div>
     </div>
+
+    <!-- Vault Location section: shows selected path and folder picker button -->
+    <div class="vault-dir-section">
+      <p class="section-label">Vault Location</p>
+
+      <div class="vault-card">
+        <span class="vault-icon">📁</span>
+        <span id="folderPath">No vault selected</span>
+      </div>
+
+      <button id="selectFolderButton">
+        <span>Select Vault Folder</span>
+      </button>
+    </div>
+
   </div>
 
   <!-- Main webview script with nonce for security -->
@@ -238,7 +244,7 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
     /**
      * Renders the directory checkbox list based on vault directory status.
      *
-     * Creates a checkbox for each directory from VAULT_DIRS, setting checked state
+     * Creates a checkbox for each directory from ARTIFACTS, setting checked state
      * based on whether the directory exists on disk. Includes labels showing
      * directory name and whether it's auto-created or optional.
      *

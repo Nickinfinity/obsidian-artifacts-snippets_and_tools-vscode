@@ -1,6 +1,6 @@
 {
   "name": "obsidian-notes-and-snippets",
-  "displayName": "Obsidian Notes & Snippets",
+  "displayName": "Obsidian Artifacts: AI Snippets & Tools",
   "description": "Extension that allows you access to your vault's notes and use them in your code or create new ones",
   "version": "0.0.1",
   "engines": {
@@ -9,15 +9,212 @@
   "categories": [
     "Other"
   ],
-  "activationEvents": [],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./dist/src/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "obsidian-notes-and-snippets.config",
-        "title": "AI Obsidian S&T: Config"
+        "command": "obsidian-artifacts.settings",
+        "title": "Obsidian Artifacts: Settings"
+      },
+      {
+        "command": "obsidian-artifacts.insert.artifact",
+        "category": "Obsidian Artifacts",
+        "title": "Insert Artifact"
+      },
+      {
+        "command": "obsidian-artifacts.edit.variables",
+        "category": "Obsidian Artifacts",
+        "title": "Edit/See Variables"
       }
-    ]
+    ],
+    "submenus": [
+      {
+        "id": "obsidian-artifacts.submenu.editor",
+        "label": "Obsidian Artifacts"
+      },
+      {
+        "id": "obsidian-artifacts.submenu.terminal",
+        "label": "Obsidian Artifacts"
+      },
+      {
+        "id": "obsidian-artifacts.submenu.explorer",
+        "label": "Obsidian Artifacts"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Snippets"}],
+          "title": "Obsidian Artifacts: Insert Snippet",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.snippetsActive && !obsidian-artifacts.editorHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Templates"}],
+          "title": "Obsidian Artifacts: Insert Template",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.templatesActive && !obsidian-artifacts.editorHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.variablesActive && !obsidian-artifacts.editorHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "submenu": "obsidian-artifacts.submenu.editor",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.editorHasMultiple",
+          "group": "obsidian@1"
+        }
+      ],
+      "terminal/context": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Commands"}],
+          "title": "Obsidian Artifacts: Insert Command",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.commandsActive && !obsidian-artifacts.terminalHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.variablesActive && !obsidian-artifacts.terminalHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "submenu": "obsidian-artifacts.submenu.terminal",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.terminalHasMultiple",
+          "group": "obsidian@1"
+        }
+      ],
+      "explorer/context": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Templates"}],
+          "title": "Obsidian Artifacts: Insert Template",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.templatesActive && !obsidian-artifacts.explorerHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "AgentsConf"}],
+          "title": "Obsidian Artifacts: Insert Agents Config",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.agentsconfActive && !obsidian-artifacts.explorerHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.variablesActive && !obsidian-artifacts.explorerHasMultiple",
+          "group": "obsidian@1"
+        },
+        {
+          "submenu": "obsidian-artifacts.submenu.explorer",
+          "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.explorerHasMultiple",
+          "group": "obsidian@1"
+        }
+      ],
+      "obsidian-artifacts.submenu.editor": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Snippets"}],
+          "title": "Insert Snippet",
+          "when": "obsidian-artifacts.snippetsActive",
+          "group": "1_insert@1"
+        },
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Templates"}],
+          "title": "Insert Template",
+          "when": "obsidian-artifacts.templatesActive",
+          "group": "1_insert@2"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.variablesActive",
+          "group": "2_variables@1"
+        }
+      ],
+      "obsidian-artifacts.submenu.terminal": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Commands"}],
+          "title": "Insert Command",
+          "when": "obsidian-artifacts.commandsActive",
+          "group": "1_insert@1"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.variablesActive",
+          "group": "2_variables@1"
+        }
+      ],
+      "obsidian-artifacts.submenu.explorer": [
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "Templates"}],
+          "title": "Insert Template",
+          "when": "obsidian-artifacts.templatesActive",
+          "group": "1_insert@1"
+        },
+        {
+          "command": "obsidian-artifacts.insert.artifact",
+          "args": [{"dir": "AgentsConf"}],
+          "title": "Insert Agents Config",
+          "when": "obsidian-artifacts.agentsconfActive",
+          "group": "1_insert@2"
+        },
+        {
+          "command": "obsidian-artifacts.edit.variables",
+          "when": "obsidian-artifacts.variablesActive",
+          "group": "2_variables@1"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Obsidian Artifacts: AI Snippets & Tools",
+      "properties": {
+        "obsidianArtifacts.vaultPath": {
+          "type": "string",
+          "default": "",
+          "description": "Absolute path to the Obsidian vault root directory. Must contain a .obsidian folder.",
+          "scope": "machine-overridable"
+        },
+        "obsidianArtifacts.defaultEnvironment": {
+          "type": "string",
+          "default": "",
+          "description": "Default environment identifier (reserved for future use).",
+          "scope": "language-overridable"
+        },
+        "obsidianArtifacts.features.snippets": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the Snippets directory. Auto-created on first vault selection."
+        },
+        "obsidianArtifacts.features.agentsconf": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable the Agents Config directory. Auto-created on first vault selection."
+        },
+        "obsidianArtifacts.features.commands": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the Commands directory (terminal context menu)."
+        },
+        "obsidianArtifacts.features.templates": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the Templates directory (editor and explorer context menus)."
+        },
+        "obsidianArtifacts.features.variables": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable the Variables directory (appears in all context menus)."
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",

@@ -1,15 +1,15 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { VAULT_DIRS } from '../types/constants.js';
-import type { VaultDir } from '../types/vault.types.js';
+import { ARTIFACTS } from '../types/constants.js';
+import type { Artifact } from '../types/artifact.types.js';
 
 /**
- * Extended vault directory information including existence status
- * @extends VaultDir
+ * Artifact directory with its current on-disk existence status.
+ * @extends Artifact
  * @property {boolean} exists - Whether the directory currently exists in the vault
  */
-export interface VaultDirStatus extends VaultDir {
+export interface ArtifactStatus extends Artifact {
 	exists: boolean;
 }
 
@@ -61,9 +61,9 @@ export function validateObsidianVault(vaultPath: string): boolean {
  * //   { name: 'Commands', dir: 'Commands', default: false, exists: false }
  * // ]
  */
-export function detectVaultDirs(vaultPath: string): VaultDirStatus[] {
-	// Map through all configured vault directories from constants
-	return VAULT_DIRS.map((dir) => {
+export function detectVaultDirs(vaultPath: string): ArtifactStatus[] {
+	// Map through all configured artifact directories from constants
+	return ARTIFACTS.map((dir) => {
 		// Construct the full path for this directory
 		const dirPath = path.join(vaultPath, dir.dir);
 		// Check if the directory exists on the filesystem
@@ -91,7 +91,9 @@ export function detectVaultDirs(vaultPath: string): VaultDirStatus[] {
  */
 export function isDirectoryEmpty(dirPath: string): boolean {
 	// Non-existent directories are considered empty
-	if (!fs.existsSync(dirPath)) return true;
+	if (!fs.existsSync(dirPath)){ 
+    return true;
+  }
 	// Check if the directory has any entries (files or subdirectories)
 	const files = fs.readdirSync(dirPath);
 	return files.length === 0;
