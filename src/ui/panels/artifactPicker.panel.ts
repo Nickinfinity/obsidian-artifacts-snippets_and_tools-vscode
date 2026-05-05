@@ -1,13 +1,15 @@
 import * as vscode from 'vscode';
 import { parseFromContent } from '../../services/parser.service.js';
 import { getNonce } from '../../utils/helpers.js';
-import type { ParsedArtifactFile, ParsedVar } from '../../types/parsed-artifact.types.js';
+import type { ParsedArtifactFile, ParsedBlock, ParsedVar } from '../../types/parsed-artifact.types.js';
 
 /** QuickPick item with optional vault-specific metadata. */
 interface ArtifactItem extends vscode.QuickPickItem {
     uri?: vscode.Uri;
     isDirectory?: boolean;
     isBack?: boolean;
+    /** Set when this item represents a `##`-headed block inside a multi-block file. */
+    block?: ParsedBlock;
 }
 
 const POPUP_VIEW_TYPE        = 'obsidianArtifactPopupPreview';
@@ -72,6 +74,8 @@ class ArtifactNavigator {
     private currentDir: vscode.Uri;
     private dirStack: vscode.Uri[] = [];
     private debounceTimer: ReturnType<typeof setTimeout> | undefined;
+    /** The artifact whose blocks are currently listed; set by `loadBlocks`. */
+    private currentArtifact: ParsedArtifactFile | undefined;
 
     // The popup panel serves two roles:
     // • preview mode  — read-only metadata display while navigating
@@ -187,6 +191,47 @@ class ArtifactNavigator {
         }, 60);
     }
 
+    // ── Block listing ─────────────────────────────────────────────────────────
+
+    /**
+     * Replaces the QuickPick list with one item per parsed block in a multi-block file.
+     *
+     * Pushes `currentDir` onto `dirStack` first so the `..` back item navigates
+     * correctly back to the parent directory listing.
+     *
+     * @param artifact - The multi-block artifact whose blocks are listed.
+     *
+     * @example
+     * // Called after the user presses Enter on a file with blocks.length > 1.
+     * this.loadBlocks(artifact);
+     */
+    private loadBlocks(artifact: ParsedArtifactFile): void {
+        this.dirStack.push(this.currentDir);
+        this.currentArtifact = artifact;
+        this.qp.value = '';
+        this.qp.title = artifact.frontmatter.title || artifact.fileName;
+
+        const items: ArtifactItem[] = [];
+        items.push({ label: '$(arrow-left)  ..', description: 'Go back', isBack: true });
+
+        for (const block of artifact.blocks) {
+            // ── Description: first sentence of block.description ──────────────
+            const firstSentence = block.description
+                ? (/^[^.!?]*[.!?]?/.exec(block.description)?.[0] ?? block.description).trim()
+                : '';
+
+            // ── Detail: vars summary (names only, no defaults) ────────────────
+            const detail = block.vars.length > 0
+                ? `$(symbol-variable)  ${block.vars.map(v => v.name).join('  |  ')}`
+                : undefined;
+
+            items.push({ label: `$(code)  ${block.heading}`, description: firstSentence || undefined, detail, block });
+        }
+
+        this.qp.items = items;
+        out.appendLine(`[blocks] listed ${artifact.blocks.length} blocks for "${this.qp.title}"`);
+    }
+
     // ── Background prefetch ───────────────────────────────────────────────────
 
     /**
@@ -211,7 +256,17 @@ class ArtifactNavigator {
 
     private async handleActiveChange(items: readonly ArtifactItem[]): Promise<void> {
         const item = items[0];
-        out.appendLine(`[active] "${item?.label ?? ''}" isDir=${item?.isDirectory} uri=${item?.uri?.fsPath ?? ''}`);
+        out.appendLine(`[active] "${item?.label ?? ''}" isDir=${item?.isDirectory} uri=${item?.uri?.fsPath ?? ''} block=${item?.block?.heading ?? ''}`);
+
+        // ── Block item: preview the individual block ──────────────────────────
+        if (item?.block && this.currentArtifact) {
+            const key = `block:${item.block.heading}`;
+            if (key !== this.lastPreviewedUri) {
+                this.lastPreviewedUri = key;
+                await this.showPreviewPanel(blockAsArtifact(item.block, this.currentArtifact));
+            }
+            return;
+        }
 
         if (!item || item.isBack || item.isDirectory || !item.uri) {
             if (this.popupPanel) {
@@ -229,7 +284,69 @@ class ArtifactNavigator {
         if (key === this.lastPreviewedUri) { return; }
         this.lastPreviewedUri = key;
 
+        // ── Multi-block file: render all blocks stacked ───────────────────────
+        if (artifact.blocks.length > 1) {
+            await this.showMultiBlockPreviewPanel(artifact);
+            return;
+        }
+
         await this.showPreviewPanel(artifact);
+    }
+
+    // ── Popup: multi-block preview ────────────────────────────────────────────
+
+    /**
+     * Creates or updates the popup panel with a stacked multi-block preview.
+     *
+     * Highlights all blocks in parallel, then renders them with
+     * `renderMultiBlockPreviewHtml`. Each block gets its own `<h2>`, description,
+     * highlighted code, and compact vars row.
+     *
+     * @param artifact - Multi-block artifact to preview.
+     *
+     * @example
+     * await this.showMultiBlockPreviewPanel(artifact);
+     */
+    private async showMultiBlockPreviewPanel(artifact: ParsedArtifactFile): Promise<void> {
+        if (!this.popupPanel) {
+            try {
+                this.popupPanel = vscode.window.createWebviewPanel(
+                    POPUP_VIEW_TYPE,
+                    'Artifact Preview',
+                    { viewColumn: vscode.ViewColumn.Beside, preserveFocus: true },
+                    {
+                        enableScripts: false,
+                        retainContextWhenHidden: true,
+                        localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'src', 'ui')],
+                    }
+                );
+                this.popupPanel.onDidDispose(() => { this.popupPanel = undefined; });
+                this.cssUri    = this.popupPanel.webview.asWebviewUri(
+                    vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', 'styles.css')
+                ).toString();
+                this.cspSource = this.popupPanel.webview.cspSource;
+            } catch (err) {
+                out.appendLine(`[popup] create FAILED (multi-block): ${(err as Error).message}`);
+                return;
+            }
+        }
+
+        // Highlight all block code sections in parallel.
+        const highlightedBlocks = await Promise.all(
+            artifact.blocks.map(async b => ({
+                heading: b.heading,
+                codeHtml: await highlightCode(
+                    b.code.length > MAX_CODE_PREVIEW_CHARS ? b.code.slice(0, MAX_CODE_PREVIEW_CHARS) + '\n…' : b.code,
+                    b.fenceLang ?? artifact.frontmatter.language
+                ),
+                vars: b.vars,
+                description: b.description,
+            }))
+        );
+
+        this.popupPanel.webview.html = renderMultiBlockPreviewHtml(artifact, highlightedBlocks, this.cssUri, this.cspSource);
+        this.popupPanel.reveal(this.popupPanel.viewColumn, true /* preserveFocus */);
+        out.appendLine(`[popup] multi-block preview → ${artifact.fileName} (${artifact.blocks.length} blocks)`);
     }
 
     // ── Parsing & cache ───────────────────────────────────────────────────────
@@ -327,6 +444,14 @@ class ArtifactNavigator {
             return;
         }
 
+        // ── Block item accepted: go straight to edit mode for that block ─────
+        if (item.block && this.currentArtifact) {
+            this.keepPopupOnHide = true;
+            this.qp.hide();
+            await this.openEditMode(this.currentArtifact, item.block.code, item.block.vars);
+            return;
+        }
+
         if (!item.uri) { return; }
 
         const artifact = await this.getOrParse(item.uri);
@@ -335,11 +460,36 @@ class ArtifactNavigator {
             return;
         }
 
+        // ── Multi-block file: show block list instead of edit mode ────────────
+        if (artifact.blocks.length > 1) {
+            this.loadBlocks(artifact);
+            return;
+        }
+
         // ── File selected: switch popup to edit mode ───────────────────────────
-        // Tell onDidHide to leave the popup alive — we're handing it to edit mode.
         this.keepPopupOnHide = true;
         this.qp.hide();
+        await this.openEditMode(artifact);
+    }
 
+    /**
+     * Ensures the popup panel exists, renders it in interactive edit mode for
+     * the given artifact, waits for Insert / Cancel, then performs the insert.
+     *
+     * `codeOverride` and `varsOverride` substitute the artifact's own `code` and
+     * `vars` when rendering and inserting — used for block-item selections so the
+     * block's content is shown while `artifact.frontmatter.type` still drives
+     * command-vs-snippet routing in `performInsert`.
+     *
+     * @param artifact      - Artifact supplying frontmatter (type, title, language).
+     * @param codeOverride  - Block code to show/insert instead of `artifact.code`.
+     * @param varsOverride  - Block vars to show instead of `artifact.vars`.
+     *
+     * @example
+     * await this.openEditMode(artifact);
+     * await this.openEditMode(parent, block.code, block.vars);
+     */
+    private async openEditMode(artifact: ParsedArtifactFile, codeOverride?: string, varsOverride?: ParsedVar[]): Promise<void> {
         // Ensure the popup panel exists (the user might have pressed Enter before
         // the 120 ms debounce fired and created it).
         if (!this.popupPanel) {
@@ -361,30 +511,32 @@ class ArtifactNavigator {
                 this.cspSource = this.popupPanel.webview.cspSource;
             } catch (err) {
                 out.appendLine(`[popup] create FAILED in accept: ${(err as Error).message}`);
-                // Fall back to showInputBox
                 await this.insertWithInputBoxFallback(artifact);
                 return;
             }
         }
 
-        // Highlight code via VS Code's markdown renderer for theme-aware syntax colors.
-        const codeRaw = artifact.code.length > MAX_CODE_PREVIEW_CHARS
-            ? artifact.code.slice(0, MAX_CODE_PREVIEW_CHARS) + '\n…'
-            : artifact.code;
+        const code     = codeOverride ?? artifact.code;
+        const editVars = varsOverride ?? artifact.vars;
+        const editArtifact = (codeOverride !== undefined || varsOverride !== undefined)
+            ? { ...artifact, code, vars: editVars }
+            : artifact;
+
+        const codeRaw  = code.length > MAX_CODE_PREVIEW_CHARS
+            ? code.slice(0, MAX_CODE_PREVIEW_CHARS) + '\n…'
+            : code;
         const codeHtml = await highlightCode(codeRaw, artifact.frontmatter.language);
 
-        // Switch to interactive edit mode and bring it into focus.
-        this.popupPanel.webview.html = renderEditHtml(artifact, getNonce(), codeHtml, this.cssUri, this.cspSource);
+        this.popupPanel.webview.html = renderEditHtml(editArtifact, getNonce(), codeHtml, this.cssUri, this.cspSource);
         this.popupPanel.reveal(this.popupPanel.viewColumn, false /* take focus */);
         out.appendLine(`[popup] edit mode → ${artifact.fileName}`);
 
-        // Wait for the user to click Insert or Cancel inside the panel.
         const vars = await waitForEditMessage(this.popupPanel);
         this.popupPanel?.dispose();
         this.popupPanel = undefined;
 
         if (vars !== null) {
-            performInsert(this.targetEditor, artifact, vars);
+            performInsert(this.targetEditor, editArtifact, vars);
         }
     }
 
@@ -458,6 +610,40 @@ function waitForEditMessage(panel: vscode.WebviewPanel): Promise<Record<string, 
             panel.onDidDispose(() => done(null))
         );
     });
+}
+
+// ── Block adapter ─────────────────────────────────────────────────────────────
+
+/**
+ * Adapts a `ParsedBlock` into a minimal `ParsedArtifactFile` so it can be passed
+ * to `renderPreviewHtml`, `renderEditHtml`, and `performInsert` without changes
+ * to those functions.
+ *
+ * Inherits `frontmatter`, `filePath`, `fileName`, and `relativePath` from the
+ * parent artifact; overrides `title`, `description`, `language`, `code`, `vars`,
+ * and clears `blocks` (blocks never nest).
+ *
+ * @param block  - The block to adapt.
+ * @param parent - The artifact the block belongs to.
+ * @returns A `ParsedArtifactFile`-shaped object for the block.
+ *
+ * @example
+ * const adapted = blockAsArtifact(item.block, this.currentArtifact);
+ * await this.showPreviewPanel(adapted);
+ */
+function blockAsArtifact(block: ParsedBlock, parent: ParsedArtifactFile): ParsedArtifactFile {
+    return {
+        ...parent,
+        frontmatter: {
+            ...parent.frontmatter,
+            title:       block.heading,
+            description: block.description || undefined,
+            language:    block.fenceLang ?? parent.frontmatter.language,
+        },
+        code:   block.code,
+        vars:   block.vars,
+        blocks: [],
+    };
 }
 
 // ── QuickPick item builder ────────────────────────────────────────────────────
@@ -601,6 +787,58 @@ function renderPreviewHtml(
     ${varsHtml}
     <p class="path">${e(a.relativePath)}</p>
     <p class="hint">Press Enter in the file list to edit variables and insert.</p>`,
+    cssUri, cspSource);
+}
+
+// ── Popup HTML: multi-block preview (read-only) ───────────────────────────────
+
+/**
+ * Renders a stacked read-only preview of all blocks in a multi-block artifact.
+ *
+ * Each block is rendered as: `<h2>` heading, optional description `<p>`,
+ * highlighted code, and a compact inline vars row. File-level metadata
+ * (type badge, tags, path) appears once at the top.
+ *
+ * @param a                - The parent artifact (supplies frontmatter + relativePath).
+ * @param highlightedBlocks - Pre-highlighted block data (heading, codeHtml, vars, description).
+ * @param cssUri           - Webview URI for the shared stylesheet.
+ * @param cspSource        - Webview CSP source token (from `webview.cspSource`).
+ *
+ * @example
+ * panel.webview.html = renderMultiBlockPreviewHtml(artifact, highlightedBlocks, cssUri, cspSource);
+ */
+function renderMultiBlockPreviewHtml(
+    a: ParsedArtifactFile,
+    highlightedBlocks: { heading: string; codeHtml: string; vars: ParsedVar[]; description: string }[],
+    cssUri: string,
+    cspSource: string
+): string {
+    const e = escHtml;
+    const title    = e(a.frontmatter.title || a.fileName);
+    const type     = e(a.frontmatter.type);
+    const lang     = a.frontmatter.language ? e(a.frontmatter.language) : '';
+    const tagsHtml = (a.frontmatter.tags ?? []).map(t => `<span class="tag">${e(t)}</span>`).join('');
+
+    const blocksHtml = highlightedBlocks.map(b => {
+        const varCodes = b.vars.map(v => `<code>${e(v.name)}</code>`).join(' · ');
+        const varsRow  = b.vars.length > 0 ? `<p class="muted block-vars">${varCodes}</p>` : '';
+        return /* html */`
+    <h2 class="block-heading">${e(b.heading)}</h2>
+    ${b.description ? `<p class="desc">${e(b.description)}</p>` : ''}
+    ${b.codeHtml}
+    ${varsRow}`;
+    }).join('\n');
+
+    return popupShell(/* html */`
+    <h1>${title}</h1>
+    <div class="badges">
+      <span class="badge">${type}</span>
+      ${lang ? `<span class="badge lang">${lang}</span>` : ''}
+    </div>
+    ${tagsHtml ? `<div class="tags">${tagsHtml}</div>` : ''}
+    ${blocksHtml}
+    <p class="path">${e(a.relativePath)}</p>
+    <p class="hint">Press Enter to choose a block.</p>`,
     cssUri, cspSource);
 }
 

@@ -5,10 +5,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
+pnpm install           # Install deps (no node_modules by default — run after clone)
 npm run compile        # One-off TypeScript build (outputs to dist/)
 npm run watch          # Watch mode for development (preferred during active development)
 npm run lint           # ESLint check (runs against src/)
 npm run test           # Compile + lint + run all tests
+npx tsc --noEmit       # Type-check only — IDE diagnostics can be stale; use this to verify
 ```
 
 Press **F5** in VS Code to launch the Extension Development Host.
@@ -34,24 +36,23 @@ src/
 ├── commands/
 │   ├── openSettings.command.ts       # Registers obsidian-artifacts.settings
 │   └── insert.command.ts             # Dynamically registers one insert command per artifact
-├── config/
-│   └── settings.ts                   # Settings webview panel (UI + message handling)
 ├── services/
 │   ├── vault.service.ts              # validateObsidianVault(), detectVaultDirs(), createVaultDirectory()
 │   ├── context.service.ts            # setVaultContextKeys(), refreshVaultContext()
-│   └── parser.service.ts             # parseArtifactFile() — parses vault .md files
-├── panels/
-│   └── artifactPicker.panel.ts       # Artifact picker webview panel (browse, preview, insert)
+│   └── parser.service.ts             # parseArtifactFile(), parseFromContent(), parseBlocks()
+├── ui/
+│   ├── panels/
+│   │   ├── artifactPicker.panel.ts   # Artifact picker (QuickPick navigator + popup webview)
+│   │   └── settings.panel.ts        # Settings webview panel (UI + message handling)
+│   └── styles.css                   # Shared webview stylesheet — loaded via webview.asWebviewUri()
 ├── types/
 │   ├── constants.ts                  # ARTIFACTS — master list of artifact directories
 │   ├── artifact.types.ts             # Artifact, ArtifactContext, ArtifactsArray interfaces
-│   └── parsed-artifact.types.ts     # ParsedArtifactFile, ParsedFrontmatter, ParsedVar, VaultEntry
+│   └── parsed-artifact.types.ts     # ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar, VaultEntry
 ├── utils/
 │   └── helpers.ts                    # getNonce() for CSP nonces
 ├── features/                         # (empty) reserved for future domain features
 └── providers/                        # (empty) reserved for future VS Code providers
-media/
-└── styles.css                        # Shared webview stylesheet — loaded via webview.asWebviewUri()
 test/
 └── extension.test.ts                 # Mocha test suite
 ```
@@ -71,7 +72,7 @@ test/
 3. If no vault path is stored in settings, the Settings panel opens automatically.
 4. A `onDidChangeConfiguration` listener watches `obsidianArtifacts.*` for Settings Sync changes and re-creates any enabled directories that are missing.
 
-### Settings panel (`src/config/settings.ts`)
+### Settings panel (`src/ui/panels/settings.panel.ts`)
 
 `openSettingsPanel(context)` creates a `WebviewPanel` (or reveals an existing one). When the user picks a folder:
 - `validateObsidianVault()` confirms the folder contains a `.obsidian/` directory.
@@ -79,17 +80,21 @@ test/
 - Missing directories that are marked `default: true` in `ARTIFACTS` are auto-created.
 - The vault path and feature flags are saved to `obsidianArtifacts.*` in VS Code settings (enabling Settings Sync).
 
-### Artifact picker (`src/panels/artifactPicker.panel.ts`)
+### Artifact picker (`src/ui/panels/artifactPicker.panel.ts`)
 
 `openArtifactPicker(dir, name)` validates the vault and artifact directory, then hands off to `ArtifactNavigator.run()`. There is no WebviewPanel — the entire picker is a `vscode.QuickPick`.
 
 **`ArtifactNavigator` class:**
 - Maintains a `dirStack` (parent URIs) and `currentDir` for hierarchical navigation.
 - `loadDir(uri)` — reads the directory with `vscode.workspace.fs.readDirectory`, builds items with `$(folder)` / `$(file)` codicons, and updates the QuickPick title to show the breadcrumb path.
-- `handleActiveChange(items)` — fires (debounced 150 ms) on `onDidChangeActive` (keyboard cursor). Reads the file asynchronously, parses it via `parseFromContent`, caches the result in `parseCache`, updates the item description in-place, then opens a `preview: true, preserveFocus: true` editor in `ViewColumn.Beside`.
-- `handleAccept()` — on Enter: navigates into dirs, pops back via the `..` item, or hides the picker and triggers var resolution + insert for file items.
+- `loadBlocks(artifact)` — replaces QuickPick items with one entry per `ParsedBlock`; pushes `currentDir` onto `dirStack` so the `..` back item works. Sets `currentArtifact` for preview/insert use.
+- `handleActiveChange(items)` — fires (debounced 150 ms) on `onDidChangeActive`. Block item → preview via `blockAsArtifact` adapter. Multi-block file (`blocks.length > 1`) → `showMultiBlockPreviewPanel`. Otherwise → `showPreviewPanel`.
+- `handleAccept()` — directory → `loadDir`; multi-block file → `loadBlocks`; block item → `openEditMode(parent, block.code, block.vars)`; single-block file → `openEditMode(artifact)`.
+- `openEditMode(artifact, codeOverride?, varsOverride?)` — ensures popup panel exists, renders `renderEditHtml`, waits for Insert/Cancel message. Overrides let a block's code/vars be shown while `artifact.frontmatter.type` drives command-vs-snippet routing.
+- `showMultiBlockPreviewPanel(artifact)` — highlights all blocks in parallel via `Promise.all(blocks.map(...highlightCode))`, renders `renderMultiBlockPreviewHtml`.
 
 **Module-level helpers:**
+- `blockAsArtifact(block, parent)` — adapts a `ParsedBlock` into a `ParsedArtifactFile` shape for preview/insert; inherits parent frontmatter, overrides `title`, `description`, `language`, `code`, `vars`.
 - `resolveVarsInteractive(vars)` — shows a `showInputBox` for each variable; returns `null` if the user cancels any box.
 - `performInsert(editor, artifact, vars)` — routes resolved content to the editor cursor, active terminal (`command` type), or clipboard fallback.
 - `resolveVars(code, vars)` — substitutes `{{PLACEHOLDER}}` tokens; unmatched tokens are left unchanged.
@@ -100,6 +105,7 @@ Two exports: `parseArtifactFile(filePath, rootDir)` (sync, reads from disk) and 
 - **Frontmatter** — YAML block between `---` fences (`type`, `title`, `description`, `language`, `tags`, `env`, `target`).
 - **Code block** — content of the ` ```code ` fenced block, trailing whitespace trimmed.
 - **Vars** — either a ` ```vars ` fenced block (for `type: variables`) or an unfenced `vars:` / `vars` section appearing after the code block.
+- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `{{PLACEHOLDER}}` vars in block code are auto-detected with `defaultValue: ''`. Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
 
 ### Insert commands (`src/commands/insert.command.ts`)
 
@@ -158,6 +164,26 @@ variableName=defaultValue
 anotherVar=
 ```
 
+A file with two or more `##` headings, each followed by a fenced code block, is a **multi-block file**. The picker shows its blocks as a sub-list; selecting one opens edit mode for that block only.
+
+```md
+---
+type: snippet
+title: API URLs
+---
+
+## Development
+Local dev server.
+\`\`\`bash
+http://localhost:{{PORT}}
+\`\`\`
+
+## Production
+\`\`\`bash
+https://api.example.com
+\`\`\`
+```
+
 For `type: variables`, the content uses a ` ```vars ` block instead of a ` ```code ` block:
 
 ```md
@@ -193,7 +219,7 @@ DB_URL=mongodb://localhost:27017
 - Compiled output goes to `dist/` and is **gitignored**. Run `npm run compile` after cloning.
 - `media/` ships in the packaged extension. `src/`, `test/`, and `dist/test/` are excluded via `.vscodeignore`.
 - All imports use explicit `.js` extensions (e.g. `'./helpers.js'`) — required by `Node16` module resolution even for `.ts` source files.
-- Webview `localResourceRoots` is restricted to `extensionUri/media` — all webview assets must live in `media/`.
+- Webview `localResourceRoots` is restricted to `extensionUri/src/ui` — all webview assets must live in `src/ui/`.
 
 ---
 
@@ -209,4 +235,10 @@ DB_URL=mongodb://localhost:27017
 - Functions and classes belong in a `services/` or `utils/` file, not in command or panel files.
 - Constants go in `src/types/constants.ts`.
 - Types and interfaces go in `src/types/`.
-- Webview panel logic (HTML generation + message handling) belongs in `src/panels/`.
+- Webview panel logic (HTML generation + message handling) belongs in `src/ui/panels/`.
+
+### ESLint gotchas
+- Use `RegExp.exec(str)` not `str.match(re)` — rule `S6594`.
+- Use `str.startsWith(x)` not `/^x/.test(str)` — rule `S6557`.
+- No nested template literals — extract inner expression to a variable first — rule `S4624`.
+- Cognitive complexity limit is 15 per function (`S3776`) — extract sub-methods when approaching it.

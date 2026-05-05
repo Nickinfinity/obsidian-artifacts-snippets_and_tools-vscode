@@ -2,7 +2,15 @@
   "permissions": {
     "allow": [
       "Bash(npm run *)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(find /home/nick -name \"index.d.ts\" -path \"*vscode*\" 2>/dev/null | head -5)",
+      "Read(//home/nick/**)",
+      "Bash(find /root /home/nick -name \"index.d.ts\" 2>/dev/null | xargs grep -l \"QuickPickItem\" 2>/dev/null | grep -v nvim | grep -v \".vscode/extensions\" | head -5; find /root -path \"*/pnpm/store*\" -name \"*.d.ts\" 2>/dev/null | xargs grep -l \"QuickPickItem\" 2>/dev/null | head -3)",
+      "Read(//root/**)",
+      "Bash(nvim --version)",
+      "Bash(git -C /home/nick/.config/nvim status)",
+      "Bash(git *)",
+      "Bash(nvim *)"
     ]
   }
 }

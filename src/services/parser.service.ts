@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { ArtifactType, ParsedArtifactFile, ParsedFrontmatter, ParsedVar } from '../types/parsed-artifact.types.js';
+import type { ArtifactType, ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar } from '../types/parsed-artifact.types.js';
 
 // Accepted `type` values — any unrecognised value keeps the 'snippet' fallback.
 const VALID_TYPES = new Set<string>(['snippet', 'template', 'command', 'agent', 'variables']);
@@ -131,6 +131,72 @@ function parseVars(content: string): ParsedVar[] {
 }
 
 /**
+ * Parses `##`-headed sections from vault file content into an ordered array of `ParsedBlock` objects.
+ *
+ * Detection rule: after stripping frontmatter, if the remaining content contains at least one
+ * `## ` heading followed (anywhere in its section) by a fenced code block, each such section
+ * is returned as a `ParsedBlock`. Returns `[]` when no qualifying sections are found, which
+ * signals that the file uses the classic single-block format.
+ *
+ * Vars for each block are auto-detected from `{{PLACEHOLDER}}` tokens in the block's code;
+ * `defaultValue` is always `''` because there is no explicit vars section per block.
+ *
+ * @param content - Full UTF-8 string content of the `.md` file.
+ * @returns Ordered array of `ParsedBlock` objects, or `[]` for single-block files.
+ *
+ * @example
+ * parseBlocks('---\ntype: snippet\n---\n## Dev\ndev server\n```bash\nhttp://localhost:{{PORT}}\n```\n## Prod\n```bash\nhttp://prod.example.com\n```')
+ * // → [
+ * //   { heading: 'Dev',  description: 'dev server', code: 'http://localhost:{{PORT}}', fenceLang: 'bash', vars: [{ name: 'PORT', defaultValue: '' }] },
+ * //   { heading: 'Prod', description: '',            code: 'http://prod.example.com',  fenceLang: 'bash', vars: [] },
+ * // ]
+ */
+export function parseBlocks(content: string): ParsedBlock[] {
+    // Strip frontmatter before scanning
+    const body = content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '');
+
+    // Split on ## headings — keep delimiter at start of each chunk via lookahead
+    const sections = body.split(/(?=^## )/m).filter(s => s.startsWith('## '));
+    if (sections.length === 0) { return []; }
+
+    const blocks: ParsedBlock[] = [];
+    for (const section of sections) {
+        // ── Extract heading ──────────────────────────────────────────────────
+        const headingMatch = /^## (.+)/.exec(section);
+        if (!headingMatch) { continue; }
+        const heading = headingMatch[1].trim();
+
+        // ── Extract fenced code block ────────────────────────────────────────
+        const fenceMatch = /```(\w*)\r?\n([\s\S]*?)```/.exec(section);
+        if (!fenceMatch) { continue; }  // heading without code block — skip
+        const fenceLang = fenceMatch[1] || undefined;
+        const code = fenceMatch[2].trimEnd();
+
+        // ── Description: text between heading line and the opening fence ─────
+        const headingEnd = section.indexOf('\n') + 1;
+        const fenceStart = section.indexOf('```');
+        const descRaw = section.slice(headingEnd, fenceStart).trim();
+
+        // ── Auto-detect vars from {{PLACEHOLDER}} tokens ─────────────────────
+        const placeholders = [...code.matchAll(/\{\{([^}]+)\}\}/g)];
+        const seen = new Set<string>();
+        const vars: ParsedVar[] = [];
+        for (const m of placeholders) {
+            const name = m[1].trim();
+            if (!seen.has(name)) {
+                seen.add(name);
+                vars.push({ name, defaultValue: '' });
+            }
+        }
+
+        blocks.push({ heading, description: descRaw, code, fenceLang, vars });
+    }
+
+    // Only return blocks when at least one qualified section was found
+    return blocks.length > 0 ? blocks : [];
+}
+
+/**
  * Reads and fully parses a single vault `.md` artifact file into a structured object.
  *
  * Combines frontmatter, code block, and vars section into a `ParsedArtifactFile`
@@ -180,6 +246,7 @@ export function parseFromContent(content: string, filePath: string, artifactRoot
         frontmatter,
         code,
         vars:         parseVars(content),
+        blocks:       parseBlocks(content),
     };
 }
 
@@ -196,6 +263,7 @@ export function parseArtifactFile(filePath: string, artifactRootDir: string): Pa
             frontmatter,
             code,
             vars:         parseVars(content),
+            blocks:       parseBlocks(content),
         };
     } catch {
         // File unreadable or parse error — caller shows appropriate UI feedback

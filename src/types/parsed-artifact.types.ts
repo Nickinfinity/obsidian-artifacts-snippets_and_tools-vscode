@@ -64,6 +64,34 @@ export interface ParsedVar {
 }
 
 /**
+ * A single `##`-headed section parsed from a multi-block vault file.
+ *
+ * Multi-block files contain two or more `##` headings, each followed by a fenced
+ * code block. When present, the picker can let the user choose which block to insert.
+ *
+ * @example
+ * {
+ *   heading:     'Development',
+ *   description: 'Local dev server URL',
+ *   code:        'http://localhost:{{PORT}}',
+ *   fenceLang:   'bash',
+ *   vars:        [{ name: 'PORT', defaultValue: '' }],
+ * }
+ */
+export interface ParsedBlock {
+    /** The `##` heading text, with leading `#` and whitespace stripped. */
+    heading: string;
+    /** Optional description paragraph between the heading and the code fence. */
+    description: string;
+    /** Raw content of the fenced code block, trailing whitespace trimmed. */
+    code: string;
+    /** Language tag from the opening fence (e.g. `bash`, `javascript`); `undefined` when absent. */
+    fenceLang?: string;
+    /** Auto-detected `{{PLACEHOLDER}}` vars found in `code`; `defaultValue` is always `''`. */
+    vars: ParsedVar[];
+}
+
+/**
  * Full parsed representation of a single `.md` vault artifact file.
  *
  * Returned by `parseArtifactFile()` and passed to the picker webview for
@@ -92,6 +120,12 @@ export interface ParsedArtifactFile {
     code: string;
     /** Ordered list of `{{PLACEHOLDER}}` variable definitions found in the file. */
     vars: ParsedVar[];
+    /**
+     * Parsed `##`-headed sections when the file is a multi-block file.
+     * Empty array means the file uses the classic single-block format — `code` and `vars`
+     * on the root object are authoritative in that case.
+     */
+    blocks: ParsedBlock[];
 }
 
 /**
