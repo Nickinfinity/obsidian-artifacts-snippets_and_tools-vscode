@@ -87,7 +87,7 @@ export interface ParsedBlock {
     code: string;
     /** Language tag from the opening fence (e.g. `bash`, `javascript`); `undefined` when absent. */
     fenceLang?: string;
-    /** Auto-detected `{{PLACEHOLDER}}` vars found in `code`; `defaultValue` is always `''`. */
+    /** Auto-detected `<VK-hint>` vars found in `code`; `defaultValue` is always `''`. */
     vars: ParsedVar[];
 }
 

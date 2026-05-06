@@ -24,7 +24,7 @@ Press **F5** in VS Code to launch the Extension Development Host.
 The current feature set:
 
 - **Config page** — a webview panel where the user selects their Obsidian vault root, validates it, and enables or disables artifact directories.
-- **Artifact picker** — a `vscode.QuickPick`-based hierarchical navigator that opens when the user triggers an insert command. The user navigates subfolders, selects a `.md` file (with a live side-by-side editor preview), fills in any `{{PLACEHOLDER}}` variable values via `showInputBox`, and the resolved content is injected at the cursor (or into the terminal for `command`-type artifacts).
+- **Artifact picker** — a `vscode.QuickPick`-based hierarchical navigator that opens when the user triggers an insert command. The user navigates subfolders, selects a `.md` file (with a live side-by-side editor preview), fills in any `<VK-xxx>` variable values via `showInputBox`, and the resolved content is injected at the cursor (or into the terminal for `command`-type artifacts).
 
 ---
 
@@ -39,7 +39,7 @@ src/
 ├── services/
 │   ├── vault.service.ts              # validateObsidianVault(), detectVaultDirs(), createVaultDirectory()
 │   ├── context.service.ts            # setVaultContextKeys(), refreshVaultContext()
-│   └── parser.service.ts             # parseArtifactFile(), parseFromContent(), parseBlocks()
+│   └── parser.service.ts             # parseArtifactFile(), parseFromContent(), parseBlocks(), extractVars(), resolveVars()
 ├── ui/
 │   ├── panels/
 │   │   ├── artifactPicker.panel.ts   # Artifact picker (QuickPick navigator + popup webview)
@@ -97,15 +97,15 @@ test/
 - `blockAsArtifact(block, parent)` — adapts a `ParsedBlock` into a `ParsedArtifactFile` shape for preview/insert; inherits parent frontmatter, overrides `title`, `description`, `language`, `code`, `vars`.
 - `resolveVarsInteractive(vars)` — shows a `showInputBox` for each variable; returns `null` if the user cancels any box.
 - `performInsert(editor, artifact, vars)` — routes resolved content to the editor cursor, active terminal (`command` type), or clipboard fallback.
-- `resolveVars(code, vars)` — substitutes `{{PLACEHOLDER}}` tokens; unmatched tokens are left unchanged.
+- `resolveVars(code, vars)` — substitutes `<VK-xxx>` tokens from the map; unmatched tokens are left unchanged.
 
 ### Parser service (`src/services/parser.service.ts`)
 
-Two exports: `parseArtifactFile(filePath, rootDir)` (sync, reads from disk) and `parseFromContent(content, filePath, rootDir)` (takes a pre-read string — used by the QuickPick picker's async reads). Both extract:
+Four exports: `parseArtifactFile(filePath, rootDir)` (sync, reads from disk), `parseFromContent(content, filePath, rootDir)` (takes a pre-read string — used by the QuickPick picker's async reads), `extractVars(code)`, and `resolveVars(code, vars)`. The parse functions extract:
 - **Frontmatter** — YAML block between `---` fences (`type`, `title`, `description`, `language`, `tags`, `env`, `target`).
 - **Code block** — content of the ` ```code ` fenced block, trailing whitespace trimmed.
 - **Vars** — either a ` ```vars ` fenced block (for `type: variables`) or an unfenced `vars:` / `vars` section appearing after the code block.
-- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `{{PLACEHOLDER}}` vars in block code are auto-detected with `defaultValue: ''`. Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
+- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `<VK-xxx>` vars in block code are auto-detected via `extractVars` with `defaultValue: ''`. Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
 
 ### Insert commands (`src/commands/insert.command.ts`)
 
@@ -155,13 +155,13 @@ tags: [tag1, tag2]
 ---
 
 ```code
-// Code content — {{PLACEHOLDER}} tokens are replaced at insert time
-const x = {{variableName}};
+// Code content — <VK-xxx> tokens are replaced at insert time
+const x = <VK-variableName>;
 ```
 
 vars:
-variableName=defaultValue
-anotherVar=
+VK-variableName=defaultValue
+VK-anotherVar=
 ```
 
 A file with two or more `##` headings, each followed by a fenced code block, is a **multi-block file**. The picker shows its blocks as a sub-list; selecting one opens edit mode for that block only.
@@ -175,7 +175,7 @@ title: API URLs
 ## Development
 Local dev server.
 \`\`\`bash
-http://localhost:{{PORT}}
+http://localhost:<VK-PORT>
 \`\`\`
 
 ## Production
@@ -197,6 +197,21 @@ API_URL=http://localhost:3000
 DB_URL=mongodb://localhost:27017
 ```
 ```
+
+---
+
+## Variable Syntax — <VK-xxx>
+
+The extension uses `<VK-xxx>` as the placeholder syntax for vault artifact variables.
+
+- **`VK-`** is a fixed prefix. The hint after the hyphen can be any casing: `camelCase`, `UPPER_SNAKE`, `PascalCase`, `lowercase`.
+- **Regex:** `/<VK-([A-Za-z][A-Za-z0-9_]*)>/g` — hint must start with a letter; subsequent characters may be letters, digits, or underscores.
+- **Collision-free by design** — does not conflict with JS/TS generics or JSX, HTML tags, CSS, Vue (`v-` prefix differs), Python, Shell, Jinja, Handlebars (`{{}}` differs), or Markdown rendering. Visually distinct at a glance.
+- **Token = variable name** — the full token including the `VK-` prefix is the variable name used for deduplication and substitution. `<VK-host>` → `name: 'VK-host'`.
+- **Auto-detected from code** — `extractVars(code)` scans any code block for tokens automatically. A `vars:` section is still supported but only needed to supply non-empty default values; keys must also use the `VK-` prefix (e.g. `VK-host=localhost`).
+- **Block-scoped in multi-block files** — in files with `## Heading` sections, each block's vars are extracted independently. The same token in two blocks produces a separate `ParsedVar` in each.
+
+> **Rule:** When writing vault artifact `.md` files or test fixtures, always use `<VK-xxx>` syntax. Never use `{{xxx}}`.
 
 ---
 

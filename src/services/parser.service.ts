@@ -131,6 +131,62 @@ function parseVars(content: string): ParsedVar[] {
 }
 
 /**
+ * Scans raw code for `<VK-hint>` tokens and returns a deduplicated list of `ParsedVar` objects.
+ *
+ * A valid token must match `<VK-hint>` where `hint` starts with a letter and is followed by
+ * zero or more letters, digits, or underscores. The full `VK-hint` string (without angle
+ * brackets) becomes the `name` field; `defaultValue` is always `''`. Duplicate tokens
+ * (same name in multiple positions) are collapsed to a single entry in first-appearance order.
+ *
+ * @param code - Arbitrary string, typically the content of a code block.
+ * @returns Deduplicated array of `{ name, defaultValue }` objects, or `[]` when no tokens are found.
+ *
+ * @example
+ * extractVars('curl <VK-host>/<VK-path> -H "x: <VK-host>"')
+ * // → [{ name: 'VK-host', defaultValue: '' }, { name: 'VK-path', defaultValue: '' }]
+ */
+export function extractVars(code: string): ParsedVar[] {
+    const matches = [...code.matchAll(/<VK-([A-Za-z]\w*)>/g)];
+    const seen = new Set<string>();
+    const vars: ParsedVar[] = [];
+    for (const m of matches) {
+        const name = `VK-${m[1]}`;
+        if (!seen.has(name)) {
+            seen.add(name);
+            vars.push({ name, defaultValue: '' });
+        }
+    }
+    return vars;
+}
+
+/**
+ * Substitutes `<VK-hint>` tokens in `code` with values from the `vars` map.
+ *
+ * Each occurrence of a `<VK-hint>` token whose key (`VK-hint`) appears in `vars`
+ * is replaced with the corresponding value. Tokens absent from the map are left
+ * unchanged so partial substitution is safe. Non-VK syntax — HTML tags, TypeScript
+ * generics, template literals, Handlebars — is never touched.
+ *
+ * @param code - String potentially containing `<VK-hint>` tokens.
+ * @param vars - Map of full token name (e.g. `'VK-host'`) to replacement value.
+ * @returns The string with all resolvable tokens substituted.
+ *
+ * @example
+ * resolveVars('http://<VK-host>:<VK-port>', { 'VK-host': 'localhost', 'VK-port': '3000' })
+ * // → 'http://localhost:3000'
+ *
+ * @example
+ * resolveVars('<VK-known> <VK-unknown>', { 'VK-known': 'hi' })
+ * // → 'hi <VK-unknown>'
+ */
+export function resolveVars(code: string, vars: Record<string, string>): string {
+    return code.replaceAll(/<VK-([A-Za-z]\w*)>/g, (match, hint: string) => {
+        const key = `VK-${hint}`;
+        return key in vars ? vars[key] : match;
+    });
+}
+
+/**
  * Parses `##`-headed sections from vault file content into an ordered array of `ParsedBlock` objects.
  *
  * Detection rule: after stripping frontmatter, if the remaining content contains at least one
@@ -138,17 +194,17 @@ function parseVars(content: string): ParsedVar[] {
  * is returned as a `ParsedBlock`. Returns `[]` when no qualifying sections are found, which
  * signals that the file uses the classic single-block format.
  *
- * Vars for each block are auto-detected from `{{PLACEHOLDER}}` tokens in the block's code;
- * `defaultValue` is always `''` because there is no explicit vars section per block.
+ * Vars for each block are auto-detected from `<VK-hint>` tokens in the block's code via
+ * `extractVars`; `defaultValue` is always `''` because there is no explicit vars section per block.
  *
  * @param content - Full UTF-8 string content of the `.md` file.
  * @returns Ordered array of `ParsedBlock` objects, or `[]` for single-block files.
  *
  * @example
- * parseBlocks('---\ntype: snippet\n---\n## Dev\ndev server\n```bash\nhttp://localhost:{{PORT}}\n```\n## Prod\n```bash\nhttp://prod.example.com\n```')
+ * parseBlocks('---\ntype: snippet\n---\n## Dev\ndev server\n```bash\nhttp://<VK-host>\n```\n## Prod\n```bash\nhttp://prod.example.com\n```')
  * // → [
- * //   { heading: 'Dev',  description: 'dev server', code: 'http://localhost:{{PORT}}', fenceLang: 'bash', vars: [{ name: 'PORT', defaultValue: '' }] },
- * //   { heading: 'Prod', description: '',            code: 'http://prod.example.com',  fenceLang: 'bash', vars: [] },
+ * //   { heading: 'Dev',  description: 'dev server', code: 'http://<VK-host>', fenceLang: 'bash', vars: [{ name: 'VK-host', defaultValue: '' }] },
+ * //   { heading: 'Prod', description: '',           code: 'http://prod.example.com', fenceLang: 'bash', vars: [] },
  * // ]
  */
 export function parseBlocks(content: string): ParsedBlock[] {
@@ -177,17 +233,8 @@ export function parseBlocks(content: string): ParsedBlock[] {
         const fenceStart = section.indexOf('```');
         const descRaw = section.slice(headingEnd, fenceStart).trim();
 
-        // ── Auto-detect vars from {{PLACEHOLDER}} tokens ─────────────────────
-        const placeholders = [...code.matchAll(/\{\{([^}]+)\}\}/g)];
-        const seen = new Set<string>();
-        const vars: ParsedVar[] = [];
-        for (const m of placeholders) {
-            const name = m[1].trim();
-            if (!seen.has(name)) {
-                seen.add(name);
-                vars.push({ name, defaultValue: '' });
-            }
-        }
+        // ── Auto-detect vars from <VK-xxx> tokens ────────────────────────────
+        const vars = extractVars(code);
 
         blocks.push({ heading, description: descRaw, code, fenceLang, vars });
     }

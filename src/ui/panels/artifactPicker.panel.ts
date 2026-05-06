@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { parseFromContent } from '../../services/parser.service.js';
+import { parseFromContent, resolveVars } from '../../services/parser.service.js';
 import { getNonce } from '../../utils/helpers.js';
 import type { ParsedArtifactFile, ParsedBlock, ParsedVar } from '../../types/parsed-artifact.types.js';
 
@@ -50,7 +50,7 @@ export async function openArtifactPicker(
 
     try {
         const stat = await vscode.workspace.fs.stat(rootUri);
-        if ((stat.type & vscode.FileType.Directory) === 0) { throw new Error(); }
+        if ((stat.type & vscode.FileType.Directory) === 0) { throw new Error('not a directory'); }
     } catch {
         vscode.window.showErrorMessage(`Obsidian Artifacts: Directory "${artifactDir}" not found in your vault.`);
         return;
@@ -72,7 +72,7 @@ class ArtifactNavigator {
     private readonly refreshedUris = new Set<string>();
 
     private currentDir: vscode.Uri;
-    private dirStack: vscode.Uri[] = [];
+    private readonly dirStack: vscode.Uri[] = [];
     private debounceTimer: ReturnType<typeof setTimeout> | undefined;
     /** The artifact whose blocks are currently listed; set by `loadBlocks`. */
     private currentArtifact: ParsedArtifactFile | undefined;
@@ -181,7 +181,7 @@ class ArtifactNavigator {
         this.qp.busy  = false;
 
         // Parse all file items in the background so metadata appears immediately.
-        void this.prefetchItems(items);
+        this.prefetchItems(items);
 
         // Trigger initial preview — onDidChangeActive may not fire automatically
         // when the QuickPick first shows.
@@ -553,7 +553,7 @@ class ArtifactNavigator {
         const root = this.rootUri.fsPath;
         const p    = uri.fsPath;
         if (p === root) { return ''; }
-        return p.startsWith(root) ? p.slice(root.length + 1).replace(/\\/g, ' / ') : '';
+        return p.startsWith(root) ? p.slice(root.length + 1).replaceAll('\\', ' / ') : '';
     }
 }
 
@@ -680,10 +680,10 @@ function buildItem(
 
     // ── detail: vars then tags, each section prefixed with a codicon ─────────
     const varsPart = parsed?.vars.length
-        ? `$(symbol-variable)  ${parsed.vars.map(v => `${v.name}=${v.defaultValue}`).join('  |  ')}`
+        ? `$(symbol-variable)  ${parsed.vars.map(v => v.name + '=' + v.defaultValue).join('  |  ')}`
         : '';
     const tagsPart = parsed?.frontmatter.tags?.length
-        ? `$(tag)  ${parsed.frontmatter.tags.map(t => `#${t}`).join(' ')}`
+        ? `$(tag)  ${parsed.frontmatter.tags.map(t => '#' + t).join(' ')}`
         : '';
     const detail = varsPart || tagsPart
         ? [varsPart, tagsPart].filter(Boolean).join('    ')
@@ -695,18 +695,32 @@ function buildItem(
 function relFsPath(uri: vscode.Uri, rootFs: string): string {
     const p = uri.fsPath;
     return (p.startsWith(rootFs + '/') || p.startsWith(rootFs + '\\'))
-        ? p.slice(rootFs.length + 1).replace(/\\/g, '/')
+        ? p.slice(rootFs.length + 1).replaceAll('\\', '/')
         : p;
 }
 
 // ── Insert helpers ────────────────────────────────────────────────────────────
 
+/**
+ * Prompts the user for each variable's value via `showInputBox`.
+ *
+ * Labels are derived from the variable name via `labelForVar` — e.g.
+ * `VK-min_price` becomes "Min price". Returns `null` if the user cancels any box.
+ *
+ * @param vars - Ordered list of variables to prompt for.
+ * @returns Resolved `{ name → value }` map, or `null` on cancel.
+ *
+ * @example
+ * const values = await resolveVarsInteractive(artifact.vars);
+ * if (values !== null) { performInsert(editor, artifact, values); }
+ */
 async function resolveVarsInteractive(vars: ParsedVar[]): Promise<Record<string, string> | null> {
     const result: Record<string, string> = {};
     for (const v of vars) {
+        const label = labelForVar(v.name);
         const value = await vscode.window.showInputBox({
-            title: `Variable: ${v.name}`, prompt: `Enter a value for {{${v.name}}}`,
-            value: v.defaultValue, placeHolder: v.defaultValue || v.name, ignoreFocusOut: true,
+            title: label, prompt: `Enter a value for ${label}`,
+            value: v.defaultValue, placeHolder: v.defaultValue || label, ignoreFocusOut: true,
         });
         if (value === undefined) { return null; }
         result[v.name] = value;
@@ -714,6 +728,20 @@ async function resolveVarsInteractive(vars: ParsedVar[]): Promise<Record<string,
     return result;
 }
 
+/**
+ * Substitutes variables and delivers resolved content to the editor, terminal, or clipboard.
+ *
+ * For `type: command` artifacts the resolved text is sent to the active terminal (created
+ * if absent). For all other types the text is inserted at the cursor; if no editor is open
+ * it falls back to the clipboard with an informational message.
+ *
+ * @param editor   - Active text editor to insert into, or `undefined` when none is open.
+ * @param artifact - Artifact supplying the code template and type.
+ * @param vars     - Resolved `{ name → value }` map from the edit panel or input box.
+ *
+ * @example
+ * performInsert(vscode.window.activeTextEditor, artifact, { 'VK-host': 'localhost' });
+ */
 function performInsert(
     editor: vscode.TextEditor | undefined,
     artifact: ParsedArtifactFile,
@@ -732,13 +760,6 @@ function performInsert(
     }
     vscode.env.clipboard.writeText(content);
     vscode.window.showInformationMessage('Obsidian Artifacts: No active editor — content copied to clipboard.');
-}
-
-function resolveVars(code: string, vars: Record<string, string>): string {
-    return code.replace(/\{\{([^}]+)\}\}/g, (_, name: string) => {
-        const key = name.trim();
-        return key in vars ? vars[key] : `{{${key}}}`;
-    });
 }
 
 // ── Popup HTML: preview mode (read-only) ─────────────────────────────────────
@@ -872,9 +893,9 @@ function renderEditHtml(
         ? `<div class="slabel">Variables</div>
            <div class="inputs">${a.vars.map(v => `
              <div class="input-row">
-               <label for="v-${e(v.name)}"><code>${e(v.name)}</code></label>
+               <label for="v-${e(v.name)}">${e(labelForVar(v.name))}</label>
                <input id="v-${e(v.name)}" data-var="${e(v.name)}" type="text"
-                      value="${e(v.defaultValue)}" placeholder="${e(v.name)}">
+                      value="${e(v.defaultValue)}" placeholder="${e(labelForVar(v.name))}">
              </div>`).join('')}
            </div>`
         : '<p class="muted">No variables — ready to insert.</p>';
@@ -951,14 +972,13 @@ function renderPopupEmptyHtml(cssUri: string, cspSource: string): string {
  * @example
  * return popupShell('<p>Hello</p>', cssUri, cspSource);
  */
-function popupShell(body: string, cssUri: string, cspSource: string): string {
-    const styleSrc = cspSource || "'unsafe-inline'";
-    const linkTag  = cssUri ? `<link rel="stylesheet" href="${cssUri}">` : '';
+function popupShell(body: string, cssUri: string, cspSource = "'unsafe-inline'"): string {
+    const linkTag = cssUri ? `<link rel="stylesheet" href="${cssUri}">` : '';
     return /* html */`<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${styleSrc};">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${cspSource};">
 ${linkTag}
 </head>
 <body class="popup-body">${body}</body>
@@ -966,5 +986,25 @@ ${linkTag}
 }
 
 function escHtml(s: string): string {
-    return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+    return s.replaceAll(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
+}
+
+/**
+ * Converts a `VK-xxx` variable name to a human-readable input label.
+ *
+ * Strips the `VK-` prefix, replaces `_` separators with spaces, lowercases
+ * the result, then capitalises the first letter — used in the edit panel and
+ * the `showInputBox` fallback.
+ *
+ * @param name - Full variable name including the `VK-` prefix.
+ * @returns Human-readable label string.
+ *
+ * @example
+ * labelForVar('VK-min_price')  // → 'Min price'
+ * labelForVar('VK-MY_VAR')     // → 'My var'
+ */
+function labelForVar(name: string): string {
+    const hint   = name.startsWith('VK-') ? name.slice(3) : name;
+    const joined = hint.split('_').join(' ').toLowerCase();
+    return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
