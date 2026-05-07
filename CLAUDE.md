@@ -46,9 +46,20 @@ src/
 │   └── temp-document.service.ts     # TempDocument — scratch VS Code editor tab for full edit
 ├── ui/
 │   ├── panels/
-│   │   ├── artifactPicker.panel.ts   # Artifact picker (QuickPick navigator + popup webview)
-│   │   └── settings.panel.ts        # Settings webview panel (UI + message handling)
-│   └── styles.css                   # Shared webview stylesheet — loaded via webview.asWebviewUri()
+│   │   ├── artifactPicker.panel.ts        # Re-export shim (back-compat for insert.command.ts)
+│   │   ├── artifactPicker/                # Split into 4 parts + shared helpers
+│   │   │   ├── navigator.ts               # Part 1 — ArtifactNavigator + openArtifactPicker (QuickPick)
+│   │   │   ├── navigator.helpers.ts       # Part 1 — buildItem, relFsPath, ArtifactItem, PREVIEW_DEBOUNCE_MS
+│   │   │   ├── codeBlock.ts               # Part 2 — buildCodeBlockHtml + CODE_BLOCK_CLIENT_JS
+│   │   │   ├── codeBlock.helpers.ts       # Part 2 — escForJsTemplate
+│   │   │   ├── preview.ts                 # Part 3 — PreviewPanelController + render funcs + msg routing
+│   │   │   ├── preview.helpers.ts         # Part 3 — escHtml, labelForVar, popupShell, blockAsArtifact, performInsert, POPUP_VIEW_TYPE
+│   │   │   ├── fullEditor.ts              # Part 4 — FullEditController (.md file watcher)
+│   │   │   ├── fullEditor.helpers.ts      # Part 4 — FULL_EDIT_VAR_SYNC_DEBOUNCE_MS
+│   │   │   └── shared.ts                  # `out` OutputChannel singleton
+│   │   ├── REFACTOR_PLAN.md               # Refactor blueprint (split rationale + state ownership)
+│   │   └── settings.panel.ts              # Settings webview panel (UI + message handling)
+│   └── styles.css                         # Shared webview stylesheet — loaded via webview.asWebviewUri()
 ├── types/
 │   ├── constants.ts                  # ARTIFACTS — master list of artifact directories
 │   ├── artifact.types.ts             # Artifact, ArtifactContext, ArtifactsArray interfaces
@@ -88,27 +99,53 @@ test/
 - Missing directories that are marked `default: true` in `ARTIFACTS` are auto-created.
 - The vault path and feature flags are saved to `obsidianArtifacts.*` in VS Code settings (enabling Settings Sync).
 
-### Artifact picker (`src/ui/panels/artifactPicker.panel.ts`)
+### Artifact picker (`src/ui/panels/artifactPicker/`)
+
+The picker is split into **four parts** under `src/ui/panels/artifactPicker/`. The legacy `artifactPicker.panel.ts` is a 1-line re-export shim kept for back-compat with `commands/insert.command.ts`. See [`src/ui/panels/REFACTOR_PLAN.md`](src/ui/panels/REFACTOR_PLAN.md) for the full split rationale and state-ownership table.
+
+| Part | File | Owns |
+|---|---|---|
+| 1 | `navigator.ts` (+ `.helpers.ts`) | `ArtifactNavigator` class, `openArtifactPicker`, parse cache, item builder, hierarchical browsing, accept/active routing |
+| 2 | `codeBlock.ts` (+ `.helpers.ts`) | Editable code-area HTML (`buildCodeBlockHtml`) and the client-side JS (`CODE_BLOCK_CLIENT_JS`) for caret preservation, debounced re-render, paste/Enter intercept |
+| 3 | `preview.ts` (+ `.helpers.ts`) | `PreviewPanelController` — popup webview lifecycle, all render functions (`renderPreviewHtml`, `renderMultiBlockPreviewHtml`, `renderPopupEmptyHtml`, `popupShell`), webview ↔ extension message routing, save-section to `.md` |
+| 4 | `fullEditor.ts` (+ `.helpers.ts`) | `FullEditController` — opens real `.md` in editor tab, watches save (`onDidSaveTextDocument` → `fileUpdated`) and change (`onDidChangeTextDocument`, debounced 500 ms → `updateVars`) |
+| — | `shared.ts` | Single `out` OutputChannel reused across every part |
 
 `openArtifactPicker(dir, name)` validates the vault and artifact directory, then hands off to `ArtifactNavigator.run()`. There is no WebviewPanel — the entire picker is a `vscode.QuickPick`.
 
-**`ArtifactNavigator` class:**
+**Code-block plug-in (Part 2 ↔ Part 3 connection):**
+- `preview.ts:renderPreviewHtml` calls `buildCodeBlockHtml(renderCodeRowsHtml(code, lang))` to inject the editable wrapper, then concatenates `CODE_BLOCK_CLIENT_JS` inside its outer IIFE so both scripts share the single `vscode = acquireVsCodeApi()` reference (`acquireVsCodeApi` may only be called once per webview).
+- The code-area client script exposes `window.__codeBlock = { extractCode, renderRows, flushPendingRender, setCode }`. The outer Insert button calls `flushPendingRender()` then reads `extractCode()`; the `fileUpdated` message handler calls `setCode(msg.artifact.code)` to re-render after a `.md` save round-trip.
+
+**Controller composition:**
+- `ArtifactNavigator` constructs a `PreviewPanelController` and passes a callback bag (`{ extensionUri, rootFs, targetEditor, setCache, onDispose, closePicker }`).
+- `PreviewPanelController` owns its `FullEditController` via callback bag (`{ rootFs, getCurrentArtifact, setCurrentArtifact, setCache, postMessage }`). The full-editor never touches the navigator directly.
+- `parseCache` lives on `ArtifactNavigator`; preview/fullEditor write to it via the `setCache` callback.
+
+**`ArtifactNavigator` class (Part 1 — `navigator.ts`):**
 - Maintains a `dirStack` (parent URIs) and `currentDir` for hierarchical navigation.
 - `loadDir(uri)` — reads the directory with `vscode.workspace.fs.readDirectory`, builds items with `$(folder)` / `$(file)` codicons, and updates the QuickPick title to show the breadcrumb path.
 - `loadBlocks(artifact)` — replaces QuickPick items with one entry per `ParsedBlock`; pushes `currentDir` onto `dirStack` so the `..` back item works. Sets `currentArtifact` for preview/insert use.
-- `handleActiveChange(items)` — fires (debounced 150 ms) on `onDidChangeActive`. Block item → preview via `blockAsArtifact` adapter. Multi-block file (`blocks.length > 1`) → `showMultiBlockPreviewPanel`. Otherwise → `showPreviewPanel` (read-only preview while navigating).
-- `handleAccept()` — directory → `loadDir`; multi-block file → `loadBlocks`; block or single-block file → `keepPopupOnHide = true`, hide QuickPick, call `showPreviewPanel`, then `reveal(false)` to focus the panel. The QuickPick closes; the popup switches to interactive edit mode.
-- `showPreviewPanel(artifact)` — ensures popup panel exists with `enableScripts: true`. Renders interactive HTML via `renderPreviewHtml` using `renderCodeRowsHtml` for the code area. Sends `{ command: 'switchMode', mode: 'edit' }` to the webview after file selection so the panel becomes interactive.
-- `showMultiBlockPreviewPanel(artifact)` — renders all blocks via `renderCodeHtml`, builds `highlightedBlocks` array (sync), renders `renderMultiBlockPreviewHtml`. Panel created with `enableScripts: true`.
-- `handleInsert(msg, artifact)` — reads edited code from the webview message, resolves `<VK-xxx>` tokens using a three-tier fallback: user-typed value → `v.defaultValue` → leave token unchanged. Calls `performInsert`.
-- `handleFullEdit(artifact)` — opens the real vault `.md` file in a VS Code editor tab via `vscode.workspace.openTextDocument`. Saves write directly to disk. The popup panel remains open.
+- `handleActiveChange(items)` — fires (debounced 120 ms) on `onDidChangeActive`. Block item → `preview.showPreview(blockAsArtifact(...))`. Multi-block file (`blocks.length > 1`) → `preview.showMultiBlockPreview`. Otherwise → `preview.showPreview` (read-only preview while navigating).
+- `handleAccept()` — directory → `loadDir`; multi-block file → `loadBlocks`; block or single-block file → `handoffToPreview(artifact)` which sets `keepPopupOnHide = true`, hides the QuickPick, and calls `preview.showPreview` + `preview.reveal(false)`.
 
-**Popup webview interactive mode (preview HTML script):**
-- Code area is a `<div class="code-block-wrapper editable" contenteditable="true">` with per-line `<span class="line-number" contenteditable="false">` spans so line numbers cannot be edited.
-- On `input`, debounces 150 ms then re-renders highlighted rows via the extension (posts `{ command: 'codeChanged', code }` and receives `{ command: 'updateRows', html }`), preserving caret position via text-node offset walking.
-- Paste intercepted to strip HTML formatting; Enter intercepted to insert `\n` via `document.execCommand`.
-- When new vars are detected (`updateVars` message), input fields are rebuilt preserving already-typed values.
-- `fileUpdated` message from extension re-renders the code area and var fields (after save from full edit mode).
+**`PreviewPanelController` (Part 3 — `preview.ts`):**
+- `showPreview(artifact)` — ensures popup panel exists with `enableScripts: true`. Renders interactive HTML via the file-private `renderPreviewHtml` (which embeds `buildCodeBlockHtml` + `CODE_BLOCK_CLIENT_JS`).
+- `showMultiBlockPreview(artifact)` — renders all blocks via `renderCodeHtml`, then `renderMultiBlockPreviewHtml`. Panel created with `enableScripts: true`.
+- `showEmpty()` — replaces panel HTML with the empty-state placeholder.
+- `handleInsert(msg)` — three-tier var resolution (user input → `v.defaultValue` → omit so token survives), then `performInsert`. Tears down the embedded `FullEditController`, disposes the panel, and calls `cb.closePicker()`.
+- `handleFullEdit()` — calls `modeController.enterFullEdit()` then `fullEdit.start(fileUri)`.
+
+**`FullEditController` (Part 4 — `fullEditor.ts`):**
+- `start(fileUri)` — opens the real `.md` beside the popup via `vscode.window.showTextDocument` and subscribes to `onDidSaveTextDocument` (→ re-parse + `fileUpdated` post-message) and `onDidChangeTextDocument` (debounced 500 ms → `updateVars` post-message).
+- `teardown()` — disposes all watchers, cancels the debounce. Always called before `panel.dispose()` to avoid posting into a disposed webview.
+
+**Popup webview interactive mode (`codeBlock.ts` + `preview.ts` scripts):**
+- Code area is a `<div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true">` with per-line `<span class="line-number" contenteditable="false">` spans so line numbers cannot be edited.
+- `CODE_BLOCK_CLIENT_JS` (Part 2) handles all code-area logic locally inside the webview: 150 ms debounced re-render via `renderRows` (no round-trip to extension), caret preservation via text-node offset walking, `Enter` intercept (insert literal `\n`), paste intercept (strip HTML).
+- The outer script (Part 3) wires Insert/Edit/Cancel buttons. Insert reads code from `window.__codeBlock.extractCode()` after calling `flushPendingRender()`.
+- `updateVars` message → outer script rebuilds input fields, preserving already-typed values.
+- `fileUpdated` message → outer script calls `window.__codeBlock.setCode(msg.artifact.code)` to refresh the code area, then rebuilds var inputs.
 
 **Code preview rendering (`src/services/render.service.ts`):**
 - Two export variants: `renderCodeHtml(code, fenceLang?)` returns a full `<div class="code-block-wrapper">…</div>` block; `renderCodeRowsHtml(code, fenceLang?)` returns only the inner rows (no wrapper). Use `renderCodeRowsHtml` when the caller supplies its own wrapper element (e.g. the editable code area in the preview panel) to avoid double-nesting.
@@ -118,10 +155,15 @@ test/
 - `.vk-var` — orange accent (`var(--vscode-charts-orange, #e8a64a)`), bold, subtle background — applied via `src/ui/styles.css`.
 - All preview colors use VS Code CSS variables (`--vscode-editor-font-family`, `--vscode-editorLineNumber-foreground`, `--vscode-charts-orange`, etc.) for automatic light/dark theme compatibility.
 
-**Module-level helpers:**
-- `blockAsArtifact(block, parent)` — adapts a `ParsedBlock` into a `ParsedArtifactFile` shape for preview/insert; inherits parent frontmatter, overrides `title`, `description`, `language`, `code`, `vars`.
+**Module-level helpers (in `preview.helpers.ts` unless noted):**
+- `blockAsArtifact(block, parent)` — adapts a `ParsedBlock` into a `ParsedArtifactFile` shape for preview/insert; inherits parent frontmatter, overrides `title`, `description`, `language`, `code`, `vars`. Re-exported from `preview.ts` so `navigator.ts` can import it from one place.
 - `performInsert(editor, artifact, vars)` — routes resolved content to the editor cursor, active terminal (`command` type), or clipboard fallback.
-- `resolveVars(code, vars)` — substitutes `<VK-xxx>` tokens from the map; unmatched tokens are left unchanged.
+- `escHtml(s)` — escapes `&<>"'` for HTML.
+- `labelForVar(name)` — strips `VK-` prefix, snake_case → spaced, capitalised.
+- `popupShell(body, cssUri, cspSource)` — wraps body in full HTML doc with shared stylesheet link + CSP.
+- `buildItem(uri, isDir, fallback, parsed, rootFs)` (`navigator.helpers.ts`) — builds a richly-populated `ArtifactItem` with `$(file)/$(folder)` codicons, vars/tags detail row.
+- `relFsPath(uri, rootFs)` (`navigator.helpers.ts`) — POSIX relative path computation.
+- `resolveVars(code, vars)` (`services/parser.service.ts`) — substitutes `<VK-xxx>` tokens from the map; unmatched tokens are left unchanged.
 
 **QuickPick variable display:**
 - Variable names in QuickPick item descriptions strip the `VK-` prefix — e.g. `host` is shown instead of `VK-host`. The full `VK-` prefixed name is still used internally for substitution.
@@ -300,6 +342,30 @@ The extension uses `<VK-xxx>` as the placeholder syntax for vault artifact varia
 ---
 
 ## Code Style
+
+### ⚠️ File complexity limits (READ FIRST)
+
+**Never grow a single file into a god-object.** Before adding code to an existing file, check whether the new logic belongs in a sibling file instead. The cost of one extra import line is trivial; the cost of a 1000-line file is paid every time anyone reads it.
+
+**Hard rules:**
+- A single `.ts` file SHOULD stay under **~400 lines**. At ~500 lines, plan a split. **Past 700 lines, split before adding more.**
+- A single function SHOULD stay under **~50 lines**. ESLint enforces cognitive-complexity ≤ 15 (rule `S3776`); when you approach it, extract sub-methods.
+- A single class SHOULD own **one concern**. If you find yourself writing a `// ── Section X ──` comment block to navigate inside a class, that section probably wants to be its own file or controller.
+
+**Splitting pattern:** every domain feature gets a folder, not a file. Inside the folder:
+- One `*.ts` per **concern** (one class / one orchestrator / one HTML renderer / one watcher).
+- One sibling `*.helpers.ts` per concern for **pure functions, escapers, adapters, constants** that the main file uses but does not own state for.
+- A `shared.ts` (or similar) for cross-concern singletons (output channels, view-type ids, etc.).
+
+**Worked example:** the artifact picker started as a single 1182-line `artifactPicker.panel.ts` mixing QuickPick navigation, code-area rendering, preview chrome, and full-editor watching. It was split into four parts (`navigator`, `codeBlock`, `preview`, `fullEditor`) under `src/ui/panels/artifactPicker/`, each with a sibling `*.helpers.ts`. Controllers compose via callback bags — no part reaches into another's internals. See [`src/ui/panels/REFACTOR_PLAN.md`](src/ui/panels/REFACTOR_PLAN.md) for the move-order template to apply when splitting other large files.
+
+**Decision flow when you reach for a file that is already large:**
+1. Does the new code belong to the **same concern** as the existing file? If no → new sibling file.
+2. Is the new code **stateless / pure**? If yes → put it in the matching `*.helpers.ts` (create one if absent).
+3. Is it a **service / cross-cutting**? If yes → `src/services/`, not the panel/command file.
+4. Only if 1-3 are all "no"-with-good-reason: add it to the existing file.
+
+**Refactor proactively, not reactively.** When you finish a feature and notice the file crossed 400 lines, propose a split in the same PR rather than letting debt accumulate.
 
 ### Comments
 - Every function and interface must have a JSDoc block that includes: a concise description, `@param` tags, a `@returns` tag, and at least one `@example`.
