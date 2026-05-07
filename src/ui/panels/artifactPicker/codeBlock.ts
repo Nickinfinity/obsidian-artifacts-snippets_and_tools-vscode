@@ -1,0 +1,161 @@
+import { escHtml } from './preview.helpers.js';
+
+/**
+ * Builds the contenteditable code-block HTML fragment.
+ *
+ * The wrapper carries the `editable` modifier so it gets the editor border /
+ * caret colour from `styles.css`.  Line numbers are server-rendered (passed in
+ * via `rowsHtml`) and refreshed in-place on every keystroke by the client-side
+ * script.
+ *
+ * @param rowsHtml - Pre-rendered row HTML produced by `renderCodeRowsHtml`.
+ * @param lang     - Highlight.js language id (echoed into `data-lang` for inspection).
+ * @returns The slabel + wrapper HTML.
+ *
+ * @example
+ * buildCodeBlockHtml(renderCodeRowsHtml(code, 'javascript'), 'javascript')
+ */
+export function buildCodeBlockHtml(rowsHtml: string, lang: string): string {
+    return /* html */`
+  <div class="slabel">Content <span class="slabel-hint">— editable, not saved to .md</span></div>
+  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false" data-lang="${escHtml(lang)}">${rowsHtml || ''}</div>`;
+}
+
+/**
+ * Client-side JavaScript that powers the editable code area.
+ *
+ * Designed to be inlined inside the outer preview-panel IIFE (which already
+ * holds `vscode = acquireVsCodeApi()`).  This payload:
+ *
+ * - Looks up `#codeWrapper` itself.
+ * - Defines local `extractCode`, `escHtml`, `vkWrap`, `renderRows`.
+ * - Implements caret-preserving re-render on `input` (debounced 150 ms).
+ * - Intercepts `Enter` to insert a literal `\n` (avoids `<div>` wrapping).
+ * - Intercepts paste to strip rich HTML.
+ * - Exposes `window.__codeBlock = { extractCode, renderRows }` so the outer
+ *   script can read the latest plain-text code and re-render after a server
+ *   `fileUpdated` round-trip.
+ *
+ * The string is embedded literally — `\\n` here becomes `\n` in the rendered
+ * webview JS.
+ *
+ * @example
+ * const html = `<script nonce="${n}">(function(){ const vscode = acquireVsCodeApi(); ${CODE_BLOCK_CLIENT_JS} ... })();</script>`;
+ */
+export const CODE_BLOCK_CLIENT_JS = /* javascript */`
+  // ── Code-block client (Part 2) ──────────────────────────────────────────
+  const codeWrapper = document.getElementById('codeWrapper');
+
+  function extractCode() {
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    if (rows.length === 0) { return codeWrapper.textContent || ''; }
+    const parts = [];
+    rows.forEach(r => {
+      const c = r.querySelector('.code-content');
+      parts.push(c ? c.textContent : '');
+    });
+    return parts.join('\\n');
+  }
+
+  function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+  function vkWrap(html) {
+    return html.replace(/&lt;VK-([A-Za-z]\\w*)&gt;/g, '<span class="vk-var">&lt;VK-$1&gt;</span>');
+  }
+  function renderRows(code) {
+    const lines = code.split('\\n');
+    return lines.map(function (line, i) {
+      return '<div class="code-line-row"><span class="line-number" contenteditable="false">' +
+        (i + 1) + '</span><span class="code-content">' + vkWrap(escHtml(line)) + '</span></div>';
+    }).join('');
+  }
+
+  // ── Caret offset (counted across all .code-content text + joining \\n) ──
+  function getCaretOffset() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) { return 0; }
+    const range = sel.getRangeAt(0);
+    if (!codeWrapper.contains(range.endContainer)) { return 0; }
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    let offset = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i].querySelector('.code-content');
+      if (!c) { continue; }
+      if (c.contains(range.endContainer) || c === range.endContainer) {
+        const pre = document.createRange();
+        pre.selectNodeContents(c);
+        pre.setEnd(range.endContainer, range.endOffset);
+        return offset + pre.toString().length;
+      }
+      offset += c.textContent.length + 1;
+    }
+    return offset;
+  }
+  function setCaretOffset(offset) {
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    let remaining = offset;
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i].querySelector('.code-content');
+      if (!c) { continue; }
+      const len = c.textContent.length;
+      if (remaining <= len) { placeCaret(c, remaining); return; }
+      remaining -= len + 1;
+    }
+    const last = rows[rows.length - 1] && rows[rows.length - 1].querySelector('.code-content');
+    if (last) { placeCaret(last, last.textContent.length); }
+  }
+  function placeCaret(el, off) {
+    let remaining = off, target = null, targetOffset = 0;
+    (function walk(node) {
+      if (target) { return; }
+      if (node.nodeType === 3 /* TEXT_NODE */) {
+        if (remaining <= node.length) { target = node; targetOffset = remaining; }
+        else { remaining -= node.length; }
+        return;
+      }
+      for (let i = 0; i < node.childNodes.length && !target; i++) { walk(node.childNodes[i]); }
+    })(el);
+    const range = document.createRange();
+    if (target) { range.setStart(target, targetOffset); range.collapse(true); }
+    else        { range.selectNodeContents(el); range.collapse(false); }
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // ── Re-render on input (debounced) ────────────────────────────────────
+  let renderTimer;
+  function scheduleRender() {
+    if (renderTimer) { clearTimeout(renderTimer); }
+    renderTimer = setTimeout(function () {
+      renderTimer = undefined;
+      const code  = extractCode();
+      const caret = getCaretOffset();
+      codeWrapper.innerHTML = renderRows(code);
+      setCaretOffset(caret);
+    }, 150);
+  }
+  codeWrapper.addEventListener('input', scheduleRender);
+  codeWrapper.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      document.execCommand('insertText', false, '\\n');
+    }
+  });
+  codeWrapper.addEventListener('paste', function (ev) {
+    ev.preventDefault();
+    const text = (ev.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+
+  // Bridge: expose the hooks the outer script needs.
+  window.__codeBlock = {
+    extractCode: extractCode,
+    renderRows:  renderRows,
+    flushPendingRender: function () {
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = undefined; }
+    },
+    setCode: function (code) {
+      codeWrapper.innerHTML = renderRows(code || '');
+    },
+  };
+`;
