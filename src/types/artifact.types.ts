@@ -18,6 +18,8 @@ export interface Artifact {
 	default: boolean;
 	/** Context menu surfaces where this artifact's action should appear */
 	contexts: readonly ArtifactContext[];
+	/** Optional VS Code codicon id used in QuickPick / preview headers */
+	icon?: string;
 }
 
 export type ArtifactsArray = readonly Artifact[];
