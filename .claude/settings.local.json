@@ -24,7 +24,23 @@
       "Bash(node -e ' *)",
       "Bash(node -e \"const hljs = require\\('highlight.js'\\); console.log\\(typeof hljs.highlight\\)\")",
       "mcp__atlassian__getAccessibleAtlassianResources",
-      "mcp__atlassian__searchJiraIssuesUsingJql"
+      "mcp__atlassian__searchJiraIssuesUsingJql",
+      "Bash(xvfb-run -a npm test)",
+      "Bash(npm test *)",
+      "Bash(grep -rn '```vars\\\\|VARS_FENCE\\\\|vars\\\\\\\\\\\\\\\\?\\\\|fenceLang === '\"'\"'vars'\"'\"'\\\\|=== '\"'\"'vars'\"'\"'' src test)",
+      "Bash(grep -rn '```vars\\\\|vks\\\\|VARS_FENCE\\\\|VKS_FENCE' src/services/varset.service.ts test/parser-vars.test.ts test/varset-subsets.test.ts test/varset-scorer.test.ts test/varset-apply.test.ts)",
+      "Bash(grep -rln '```vars\\\\|buildVarSetFileContent\\\\|saveAsVarSet' test)",
+      "Bash(sed -i 's/```vars/```vks/g' js-array-utilities.md)",
+      "Bash(grep -c '```vks' js-array-utilities.md)",
+      "Bash(grep -n '```vars\\\\|vars\\\\b.*fence\\\\|fenced.*vars\\\\|```code\\\\|defaultValue is always' /home/nick/D3v/Dexsys/Extensions_Plugins/ObsidianArtifacts/obsidian-artifacts-snippets_and_tools-vscode/CLAUDE.md)",
+      "Bash(grep -rn '```vars\\\\|VARS_FENCE' /home/nick/D3v/Dexsys/Extensions_Plugins/ObsidianArtifacts/obsidian-artifacts-snippets_and_tools-vscode/CLAUDE.md /home/nick/D3v/Dexsys/Extensions_Plugins/ObsidianArtifacts/obsidian-artifacts-snippets_and_tools-vscode/src)",
+      "Bash(echo \"exit:$?\")",
+      "mcp__claude_ai_Atlassian_Rovo__getAccessibleAtlassianResources",
+      "mcp__claude_ai_Atlassian_Rovo__searchJiraIssuesUsingJql",
+      "mcp__claude_ai_Atlassian_Rovo__createJiraIssue",
+      "mcp__claude_ai_Atlassian_Rovo__addCommentToJiraIssue",
+      "Bash(perl -0pi -e 's/```\\\\n```vks\\\\n/```\\\\n\\\\n### VKs:\\\\n\\\\n```vks\\\\n/g' js-array-utilities.md)",
+      "Bash(sed -n '44,60p' js-array-utilities.md)"
     ]
   }
 }

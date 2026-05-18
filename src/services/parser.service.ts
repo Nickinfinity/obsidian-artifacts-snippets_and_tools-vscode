@@ -13,7 +13,7 @@ const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'langua
 const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const FRONTMATTER_STRIP_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const CODE_FENCE_RE        = /```(\w*)\r?\n([\s\S]*?)```/;
-const VARS_FENCE_RE        = /```vars\r?\n([\s\S]*?)```/;
+const VKS_FENCE_RE         = /```vks\r?\n([\s\S]*?)```/;
 const VK_TOKEN_RE          = /<VK-([A-Za-z]\w*)>/g;
 
 /**
@@ -124,7 +124,7 @@ function parseVarLines(raw: string): ParsedVar[] {
  * Locates and parses the variables section from raw vault file content.
  *
  * Two formats are supported, tried in priority order:
- * 1. **Fenced block** — ` ```vars\nKEY=val\n``` ` (standard for `type: variables` files).
+ * 1. **Fenced block** — ` ```vks\nKEY=val\n``` ` (standard for `type: variables` files).
  * 2. **Unfenced section** — a `vars:` or `vars` label on its own line followed by
  *    `KEY=value` pairs, placed after the ` ```code` block.
  *
@@ -132,13 +132,13 @@ function parseVarLines(raw: string): ParsedVar[] {
  * @returns Ordered array of `ParsedVar` objects, or `[]` when no vars section exists.
  *
  * @example
- * parseVars('...\n```vars\nAPI_URL=http://localhost\n```')
+ * parseVars('...\n```vks\nAPI_URL=http://localhost\n```')
  *
  * parseVars('...\n```javascript\n...\n```\n\nvars:\nroute=/test\n')
  */
 function parseVars(content: string): ParsedVar[] {
-    // Priority 1: fenced ```vars block — used by type: variables files
-    const fenced = VARS_FENCE_RE.exec(content);
+    // Priority 1: fenced ```vks block — used by type: variables files
+    const fenced = VKS_FENCE_RE.exec(content);
     if (fenced) { return parseVarLines(fenced[1]); }
 
     // Priority 2: unfenced section after the code block ("vars:" or "vars" label)
@@ -265,11 +265,62 @@ function parseBlockSection(section: string): ParsedBlock | null {
     const fenceStart = section.indexOf('```');
     const description = section.slice(headingEnd, fenceStart).trim();
 
-    // ` ```vars ``` ` fenced blocks carry `KEY=value` pairs (multi-block variable
-    // sets). Every other fence is code → auto-detect `<VK-…>` tokens.
-    const vars = fenceLang === 'vars' ? parseVarLines(code) : extractVars(code);
+    // ` ```vks ``` ` as the *first* fence → pure variable sub-set (multi-block
+    // variable files). A code fence *followed by* a ` ```vks ``` ` fence → the
+    // vks fence supplies default values for the code's auto-detected `<VK-…>`
+    // tokens. A bare code fence → tokens detected with empty defaults.
+    const vars = fenceLang === 'vks'
+        ? parseVarLines(code)
+        : mergeVarDefaults(extractVars(code), readTrailingVarsFence(section));
 
     return { heading, description, code, fenceLang, vars };
+}
+
+/**
+ * Returns the `KEY=value` pairs of a ` ```vks ``` ` fence that follows the
+ * section's code fence, or `[]` when the section has no such fence.
+ *
+ * `VKS_FENCE_RE` only matches a fence whose info-string is exactly `vks`, so
+ * the leading ` ```javascript ``` ` code fence is never mistaken for it.
+ *
+ * @param section - Raw text of a single `##`-prefixed section.
+ * @returns Ordered array of `{ name, defaultValue }` from the vks fence, or `[]`.
+ *
+ * @example
+ * readTrailingVarsFence('## A\n```js\nf(<VK-x>)\n```\n```vks\nVK-x=1\n```')
+ */
+function readTrailingVarsFence(section: string): ParsedVar[] {
+    const fence = VKS_FENCE_RE.exec(section);
+    return fence ? parseVarLines(fence[1]) : [];
+}
+
+/**
+ * Overlays `defaults` onto the code-detected `vars`, preserving code order.
+ *
+ * Detected vars keep their first-appearance order; a matching `defaults` entry
+ * (same `name`) supplies its `defaultValue`. Any `defaults` entry with no
+ * matching detected var is appended in declaration order so users can declare
+ * extra defaults the code does not (yet) reference.
+ *
+ * @param detected - Vars auto-detected from the code block (defaultValue always `''`).
+ * @param defaults - Vars parsed from the trailing ` ```vks ``` ` fence.
+ * @returns Merged, de-duplicated `ParsedVar[]` in code-then-extra order.
+ *
+ * @example
+ * mergeVarDefaults([{ name: 'VK-a', defaultValue: '' }], [{ name: 'VK-a', defaultValue: '1' }])
+ */
+function mergeVarDefaults(detected: ParsedVar[], defaults: ParsedVar[]): ParsedVar[] {
+    if (defaults.length === 0) { return detected; }
+    const byName = new Map(defaults.map(d => [d.name, d.defaultValue]));
+    const merged: ParsedVar[] = detected.map(v => ({
+        name: v.name,
+        defaultValue: byName.has(v.name) ? byName.get(v.name)! : v.defaultValue,
+    }));
+    const detectedNames = new Set(detected.map(v => v.name));
+    for (const d of defaults) {
+        if (!detectedNames.has(d.name)) { merged.push({ name: d.name, defaultValue: d.defaultValue }); }
+    }
+    return merged;
 }
 
 /**

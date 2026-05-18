@@ -218,7 +218,7 @@ function buildVarSetFileContent(
     const lines: string[] = ['---', 'type: variables', `title: ${title}`];
     if (description.length > 0) { lines.push(`description: ${description}`); }
     if (tags.length > 0)        { lines.push(`tags: [${tags.join(', ')}]`); }
-    lines.push('---', '', '```vars');
+    lines.push('---', '', '```vks');
     for (const [name, value] of entries) { lines.push(`${name}=${value}`); }
     lines.push('```', '');
     return lines.join('\n');

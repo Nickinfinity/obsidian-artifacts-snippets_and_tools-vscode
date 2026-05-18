@@ -179,8 +179,8 @@ The picker is split into **four parts** under `src/ui/panels/artifactPicker/`. T
 Four exports: `parseArtifactFile(filePath, rootDir)` (sync, reads from disk), `parseFromContent(content, filePath, rootDir)` (takes a pre-read string — used by the QuickPick picker's async reads), `extractVars(code)`, and `resolveVars(code, vars)`. The parse functions extract:
 - **Frontmatter** — YAML block between `---` fences (`type`, `title`, `description`, `language`, `tags`, `env`, `target`).
 - **Code block** — content of the ` ```code ` fenced block, trailing whitespace trimmed.
-- **Vars** — either a ` ```vars ` fenced block (for `type: variables`) or an unfenced `vars:` / `vars` section appearing after the code block.
-- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `<VK-xxx>` vars in block code are auto-detected via `extractVars` with `defaultValue: ''`. Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
+- **Vars** — either a ` ```vks ` fenced block (for `type: variables`) or an unfenced `vars:` / `vars` section appearing after the code block.
+- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `<VK-xxx>` vars in block code are auto-detected via `extractVars`. A section whose **first** fence is ` ```vks ` is a pure variable sub-set. A code fence **followed by** a ` ```vks ` fence in the same section gets default values merged onto its detected tokens via `mergeVarDefaults` (code order preserved; vks-only keys appended; unmatched detected vars keep `defaultValue: ''`). Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
 
 ### Insert commands (`src/commands/insert.command.ts`)
 
@@ -267,7 +267,7 @@ VK-variableName=defaultValue
 VK-anotherVar=
 ```
 
-A file with two or more `##` headings, each followed by a fenced code block, is a **multi-block file**. The picker shows its blocks as a sub-list; selecting one opens edit mode for that block only.
+A file with two or more `##` headings, each followed by a fenced code block, is a **multi-block file**. The picker shows its blocks as a sub-list; selecting one opens edit mode for that block only. Each section may carry its own default values by placing a ` ```vks ` fence **anywhere after** its code fence — keys must use the full `VK-` prefix. Any non-code text between the code fence and the ` ```vks ` fence (blank lines, an `### VKs:` marker, prose — any text that is not itself a fenced code block) is ignored; the ` ```vks ` fence still binds to the section's code. Sections split on `## ` (h2) only, so `###`+ markers stay inside the block:
 
 ```md
 ---
@@ -281,13 +281,19 @@ Local dev server.
 http://localhost:<VK-PORT>
 \`\`\`
 
+### VKs:
+
+\`\`\`vks
+VK-PORT=3000
+\`\`\`
+
 ## Production
 \`\`\`bash
 https://api.example.com
 \`\`\`
 ```
 
-For `type: variables`, the content uses a ` ```vars ` block instead of a ` ```code ` block:
+For `type: variables`, the content uses a ` ```vks ` block instead of a ` ```code ` block:
 
 ```md
 ---
@@ -295,7 +301,7 @@ type: variables
 env: dev
 ---
 
-```vars
+```vks
 API_URL=http://localhost:3000
 DB_URL=mongodb://localhost:27017
 ```
@@ -328,8 +334,8 @@ diff-preview flow.
 **Storage and shape:**
 
 - Variable set files live in the vault's `Variables/` directory with `type: variables` frontmatter.
-- A single-block variable file uses one ` ```vars ` fence — its top-level `vars` are the whole set.
-- A multi-block variable file uses `## Heading` + ` ```vars ` blocks. Each heading is an independent sub-set with its own `vars`.
+- A single-block variable file uses one ` ```vks ` fence — its top-level `vars` are the whole set.
+- A multi-block variable file uses `## Heading` + ` ```vks ` blocks. Each heading is an independent sub-set with its own `vars`.
 
 **Scoring and picking:**
 

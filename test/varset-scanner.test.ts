@@ -64,7 +64,7 @@ function writeVarFile(filePath: string, env: string, vars: Record<string, string
         `env: ${env}`,
         '---',
         '',
-        '```vars',
+        '```vks',
         ...Object.entries(vars).map(([k, v]) => `${k}=${v}`),
         '```',
         '',
