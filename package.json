@@ -43,6 +43,18 @@
         "command": "obsidian-artifacts.insert.variables",
         "category": "Obsidian Artifacts",
         "title": "See/Edit Variables"
+      },
+      {
+        "command": "obsidian-artifacts.create",
+        "title": "Obsidian Artifacts: Create Artifact"
+      },
+      {
+        "command": "obsidian-artifacts.create.fromSelection.snippet",
+        "title": "Obsidian Artifacts: Create Snippet from Selection"
+      },
+      {
+        "command": "obsidian-artifacts.create.fromSelection.command",
+        "title": "Obsidian Artifacts: Create Command from Selection"
       }
     ],
     "submenus": [
@@ -60,6 +72,12 @@
       }
     ],
     "menus": {
+      "commandPalette": [
+        {
+          "command": "obsidian-artifacts.create",
+          "when": "obsidian-artifacts.vaultConfigured"
+        }
+      ],
       "editor/context": [
         {
           "command": "obsidian-artifacts.insert.snippets",
@@ -80,6 +98,11 @@
           "submenu": "obsidian-artifacts.submenu.editor",
           "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.editorHasMultiple",
           "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.create.fromSelection.snippet",
+          "when": "editorHasSelection && obsidian-artifacts.vaultConfigured",
+          "group": "9_obsidian-artifacts@1"
         }
       ],
       "terminal/context": [
@@ -97,6 +120,11 @@
           "submenu": "obsidian-artifacts.submenu.terminal",
           "when": "obsidian-artifacts.vaultConfigured && obsidian-artifacts.terminalHasMultiple",
           "group": "obsidian@1"
+        },
+        {
+          "command": "obsidian-artifacts.create.fromSelection.command",
+          "when": "obsidian-artifacts.vaultConfigured",
+          "group": "9_obsidian-artifacts@1"
         }
       ],
       "explorer/context": [

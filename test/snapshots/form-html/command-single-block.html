@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-test-nonce-abc123'; style-src https://test-csp-source;">
+<link rel="stylesheet" href="https://test-css-uri/styles.css">
+</head>
+<body class="form-body">
+<div class="form-panel">
+<div class="form-section">
+  <label class="slabel" for="title">Title</label>
+  <input type="text" id="title" class="form-input" value="Deploy" placeholder="Artifact title">
+</div>
+<div class="form-section">
+  <label class="slabel" for="description">Description</label>
+  <textarea id="description" class="form-input form-textarea" rows="2" placeholder="Optional description"></textarea>
+</div>
+<div class="form-section">
+  <div class="slabel">Tags</div>
+  <div class="tags-row" id="tags-row">
+    <input type="text" id="tag-input" class="tag-input" placeholder="Add tag…">
+  </div>
+</div>
+<div id="blocks-area" class="blocks-area" data-lang-mode="locked" data-default-lang="bash" data-type="command" data-singular="command">
+<div class="block" data-block-index="0">
+<div class="field-row lang-row">
+  <label class="slabel" for="block-0-lang">Language</label>
+  <select id="block-0-lang" class="lang-select" data-block="0" disabled>
+    <option value="bash" selected>bash</option>
+  </select>
+</div>
+<div class="block-code">
+<pre class="mock-code-block" data-lang="bash">echo deploy</pre>
+</div>
+
+</div>
+</div>
+<button id="add-block-btn" class="add-block-btn">+ Add additional command</button>
+<div class="form-footer">
+  <button id="save-btn" class="btn btn-primary">Save</button>
+  <button id="cancel-btn" class="btn">Cancel</button>
+  <button id="delete-btn" class="btn btn-danger">Delete entire command</button>
+</div>
+</div>
+
+</body>
+</html>

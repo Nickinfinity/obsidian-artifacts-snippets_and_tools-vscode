@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { registerOpenSettingsCommand } from './commands/openSettings.command.js';
 import { registerInsertCommands } from './commands/insert.command.js';
+import { registerCreateCommands } from './commands/create.command.js';
 import { refreshVaultContext } from './services/context.service.js';
 import { createVaultDirectory } from './services/vault.service.js';
 import { ARTIFACTS } from './types/constants.js';
@@ -18,6 +19,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Register commands first so executeCommand calls below resolve correctly
 	registerOpenSettingsCommand(context);
 	registerInsertCommands(context);
+	registerCreateCommands(context);
 
 	// Await context key setup — ensures menus reflect vault state before first user interaction.
 	// Without await the keys land asynchronously and the first right-click may show no items.

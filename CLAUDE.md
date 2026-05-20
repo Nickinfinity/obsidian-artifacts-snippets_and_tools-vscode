@@ -244,83 +244,18 @@ When the user presses Enter on a file in the QuickPick, the picker closes and th
 
 ---
 
-## Vault File Format
+## Vault File Format & Variable Syntax
 
-Each artifact is a `.md` file following this structure:
-
-```md
----
-type: snippet | template | command | agent | variables
-title: Human-readable title
-description: Short explanation
-language: javascript
-tags: [tag1, tag2]
----
-
-```code
-// Code content — <VK-xxx> tokens are replaced at insert time
-const x = <VK-variableName>;
-```
-
-vars:
-VK-variableName=defaultValue
-VK-anotherVar=
-```
-
-A file with two or more `##` headings, each followed by a fenced code block, is a **multi-block file**. The picker shows its blocks as a sub-list; selecting one opens edit mode for that block only. Each section may carry its own default values by placing a ` ```vks ` fence **anywhere after** its code fence — keys must use the full `VK-` prefix. Any non-code text between the code fence and the ` ```vks ` fence (blank lines, an `### VKs:` marker, prose — any text that is not itself a fenced code block) is ignored; the ` ```vks ` fence still binds to the section's code. Sections split on `## ` (h2) only, so `###`+ markers stay inside the block:
-
-```md
----
-type: snippet
-title: API URLs
----
-
-## Development
-Local dev server.
-\`\`\`bash
-http://localhost:<VK-PORT>
-\`\`\`
-
-### VKs:
-
-\`\`\`vks
-VK-PORT=3000
-\`\`\`
-
-## Production
-\`\`\`bash
-https://api.example.com
-\`\`\`
-```
-
-For `type: variables`, the content uses a ` ```vks ` block instead of a ` ```code ` block:
-
-```md
----
-type: variables
-env: dev
----
-
-```vks
-API_URL=http://localhost:3000
-DB_URL=mongodb://localhost:27017
-```
-```
-
----
-
-## Variable Syntax — <VK-xxx>
-
-The extension uses `<VK-xxx>` as the placeholder syntax for vault artifact variables.
-
-- **`VK-`** is a fixed prefix. The hint after the hyphen can be any casing: `camelCase`, `UPPER_SNAKE`, `PascalCase`, `lowercase`.
-- **Regex:** `/<VK-([A-Za-z][A-Za-z0-9_]*)>/g` — hint must start with a letter; subsequent characters may be letters, digits, or underscores.
-- **Collision-free by design** — does not conflict with JS/TS generics or JSX, HTML tags, CSS, Vue (`v-` prefix differs), Python, Shell, Jinja, Handlebars (`{{}}` differs), or Markdown rendering. Visually distinct at a glance.
-- **Token = variable name** — the full token including the `VK-` prefix is the variable name used for deduplication and substitution. `<VK-host>` → `name: 'VK-host'`.
-- **Auto-detected from code** — `extractVars(code)` scans any code block for tokens automatically. A `vars:` section is still supported but only needed to supply non-empty default values; keys must also use the `VK-` prefix (e.g. `VK-host=localhost`).
-- **Block-scoped in multi-block files** — in files with `## Heading` sections, each block's vars are extracted independently. The same token in two blocks produces a separate `ParsedVar` in each.
-
-> **Rule:** When writing vault artifact `.md` files or test fixtures, always use `<VK-xxx>` syntax. Never use `{{xxx}}`.
+> **Authoritative spec moved out of this file.** The full on-disk `.md`
+> structure (single-block, multi-block, `type: variables`), the per-artifact
+> variations table, and the `<VK-xxx>` variable syntax now live in
+> [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) at the repo root.
+>
+> **Read that file before** writing any vault `.md`, test fixture, parser
+> change, or serializer/writer — it is the single source of truth that the
+> parser implements and any round-trip (`parse(serialize(x)) ≅ x`) must satisfy.
+> Keep it and `src/services/parser.service.ts` in sync; if they disagree, that
+> is a bug to reconcile, not a judgement call.
 
 ---
 
@@ -331,11 +266,7 @@ to any artifact at insert time. They live alongside snippets/templates/etc. in
 their own vault directory and are consumed by a dedicated picker, scorer, and
 diff-preview flow.
 
-**Storage and shape:**
-
-- Variable set files live in the vault's `Variables/` directory with `type: variables` frontmatter.
-- A single-block variable file uses one ` ```vks ` fence — its top-level `vars` are the whole set.
-- A multi-block variable file uses `## Heading` + ` ```vks ` blocks. Each heading is an independent sub-set with its own `vars`.
+**Storage and shape:** see [`ARTIFACT_FILE_FORMAT.md` §6](ARTIFACT_FILE_FORMAT.md) — the on-disk shape of variable-set files is documented there with the rest of the artifact format spec.
 
 **Scoring and picking:**
 
@@ -400,6 +331,7 @@ diff-preview flow.
 | `.vscode/launch.json` | Debug launch with `--extensionDevelopmentPath`; other extensions disabled in the host |
 | `.vscode/tasks.json` | `npm watch` is the default build task (runs automatically on F5) |
 | `.vscode-test.mjs` | Test runner looks for compiled tests at `dist/test/**/*.test.js` |
+| [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) | **Authoritative** artifact `.md` structure spec — parser/serializer contract. Read before touching vault files, fixtures, parser, or any writer. |
 
 ---
 
