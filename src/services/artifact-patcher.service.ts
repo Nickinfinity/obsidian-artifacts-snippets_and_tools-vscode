@@ -1,4 +1,149 @@
 
+// ── patchBlockCode ────────────────────────────────────────────────────────────
+
+/**
+ * Identifies which code block in a `.md` artifact file a patch targets.
+ *
+ * - `{ kind: 'single' }` — the lone code fence of a single-block file.
+ * - `{ kind: 'multi', heading }` — the code fence inside the `## <heading>`
+ *   section of a multi-block file. When two headings share text, the first
+ *   match wins (v1 behaviour).
+ */
+export type BlockRef =
+    | { kind: 'single' }
+    | { kind: 'multi'; heading: string };
+
+/**
+ * Replaces the body of a single code fence in a `.md` artifact file with
+ * `newCode`, leaving everything else byte-for-byte intact.
+ *
+ * Round-trip contract (see ARTIFACT_FILE_FORMAT.md): the fence info-string,
+ * frontmatter, per-block descriptions, sibling blocks, and any ` ```vks ` fences
+ * are preserved. Only the lines between the target code fence's open and close
+ * are swapped. Trailing-whitespace trimming follows the parser's rules.
+ *
+ * @param content  - Raw `.md` file content string.
+ * @param blockRef - Which block to patch (`single`, or `multi` by heading).
+ * @param newCode  - Replacement code body (no surrounding fences).
+ * @returns Updated content string. The original is returned unchanged when the
+ *          target block cannot be located.
+ *
+ * @example
+ * patchBlockCode(raw, { kind: 'single' }, 'const x = 2;')
+ * patchBlockCode(raw, { kind: 'multi', heading: 'Production' }, 'https://api.example.com')
+ */
+export function patchBlockCode(content: string, blockRef: BlockRef, newCode: string): string {
+    const lines = content.split('\n');
+    const openIdx = blockRef.kind === 'single'
+        ? findSingleFenceOpen(lines)
+        : findMultiFenceOpen(lines, blockRef.heading);
+
+    if (openIdx === -1) { return content; }
+
+    const closeIdx = findFenceClose(lines, openIdx);
+    if (closeIdx === -1) { return content; }
+
+    const patched = [
+        ...lines.slice(0, openIdx + 1),
+        ...newCode.split('\n'),
+        ...lines.slice(closeIdx),
+    ];
+    return patched.join('\n');
+}
+
+/**
+ * Returns the line index just past the closing `---` of a leading frontmatter
+ * block, or `0` when the file has no frontmatter.
+ *
+ * @param lines - Split content lines.
+ * @returns Zero-based index of the first body line after frontmatter.
+ *
+ * @example
+ * frontmatterEnd(['---', 'type: snippet', '---', '', '```code'])  // → 3
+ */
+function frontmatterEnd(lines: string[]): number {
+    if (lines[0] !== '---') { return 0; }
+    for (let i = 1; i < lines.length; i++) {
+        if (lines[i] === '---') { return i + 1; }
+    }
+    return 0;
+}
+
+/**
+ * Finds the opening fence of the single code block — the first non-`vks` fence
+ * after the frontmatter.
+ *
+ * @param lines - Split content lines.
+ * @returns Line index of the opening fence, or `-1` when none is found.
+ *
+ * @example
+ * findSingleFenceOpen(['---', '---', '```code', 'x', '```'])  // → 2
+ */
+function findSingleFenceOpen(lines: string[]): number {
+    for (let i = frontmatterEnd(lines); i < lines.length; i++) {
+        if (isFenceOpen(lines[i])) { return i; }
+    }
+    return -1;
+}
+
+/**
+ * Finds the opening code fence inside the `## <heading>` section of a multi-block
+ * file. Skips ` ```vks ` fences so only the section's code fence is targeted.
+ *
+ * @param lines   - Split content lines.
+ * @param heading - Section heading text (without the `## ` prefix).
+ * @returns Line index of the opening fence, or `-1` when the heading or its code
+ *          fence is not found.
+ *
+ * @example
+ * findMultiFenceOpen(['## Dev', '```bash', 'x', '```'], 'Dev')  // → 1
+ */
+function findMultiFenceOpen(lines: string[], heading: string): number {
+    const headingLine = '## ' + heading;
+    const headingIdx = lines.indexOf(headingLine);
+    if (headingIdx === -1) { return -1; }
+
+    for (let i = headingIdx + 1; i < lines.length; i++) {
+        if (lines[i].startsWith('## ')) { return -1; }   // next section, no code fence
+        if (isFenceOpen(lines[i])) { return i; }
+    }
+    return -1;
+}
+
+/**
+ * Finds the closing fence (a line that is exactly ` ``` `) for a fence opened at
+ * `openIdx`.
+ *
+ * @param lines   - Split content lines.
+ * @param openIdx - Index of the opening fence line.
+ * @returns Line index of the closing fence, or `-1` when unterminated.
+ *
+ * @example
+ * findFenceClose(['```code', 'x', '```'], 0)  // → 2
+ */
+function findFenceClose(lines: string[], openIdx: number): number {
+    for (let i = openIdx + 1; i < lines.length; i++) {
+        if (lines[i] === '```') { return i; }
+    }
+    return -1;
+}
+
+/**
+ * Reports whether a line opens a non-`vks` code fence (` ``` `, ` ```code `,
+ * ` ```javascript `, …) — i.e. an info-string fence that is not ` ```vks `.
+ *
+ * @param line - A single content line.
+ * @returns `true` for a code-fence opener, `false` otherwise.
+ *
+ * @example
+ * isFenceOpen('```javascript')  // → true
+ * isFenceOpen('```vks')         // → false
+ */
+function isFenceOpen(line: string): boolean {
+    if (!line.startsWith('```')) { return false; }
+    return line.slice(3).trim() !== 'vks';
+}
+
 // ── patchFrontmatterField ─────────────────────────────────────────────────────
 
 /**

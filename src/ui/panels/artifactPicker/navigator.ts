@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { parseFromContent } from '../../../services/parser.service.js';
+import type { BlockRef } from '../../../services/artifact-patcher.service.js';
 import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js';
 import { out } from './shared.js';
 import { ArtifactItem, buildItem, PREVIEW_DEBOUNCE_MS } from './navigator.helpers.js';
@@ -16,14 +17,17 @@ import { PreviewPanelController, blockAsArtifact } from './preview.js';
  * @param artifactDir  - Vault-relative directory name (e.g. `'Snippets'`).
  * @param artifactName - Human-readable name shown in the QuickPick title.
  * @param extensionUri - Extension URI used to resolve the shared CSS stylesheet.
+ * @param storageUri   - Extension storage dir for block-edit temp files
+ *                       (`context.storageUri ?? context.globalStorageUri`).
  *
  * @example
- * await openArtifactPicker('Snippets', 'Snippets', context.extensionUri);
+ * await openArtifactPicker('Snippets', 'Snippets', context.extensionUri, storageUri);
  */
 export async function openArtifactPicker(
     artifactDir: string,
     artifactName: string,
     extensionUri: vscode.Uri,
+    storageUri: vscode.Uri,
 ): Promise<void> {
     const vaultPath = vscode.workspace
         .getConfiguration('obsidianArtifacts')
@@ -46,7 +50,7 @@ export async function openArtifactPicker(
     }
 
     const targetEditor = vscode.window.activeTextEditor;
-    await new ArtifactNavigator(rootUri, artifactName, targetEditor, extensionUri).run();
+    await new ArtifactNavigator(rootUri, artifactName, targetEditor, extensionUri, storageUri).run();
 }
 
 // ── ArtifactNavigator ─────────────────────────────────────────────────────────
@@ -74,6 +78,7 @@ class ArtifactNavigator {
         artifactName: string,
         targetEditor: vscode.TextEditor | undefined,
         extensionUri: vscode.Uri,
+        storageUri: vscode.Uri,
     ) {
         this.rootUri      = rootUri;
         this.currentDir   = rootUri;
@@ -93,6 +98,7 @@ class ArtifactNavigator {
             setCache:     (uri, parsed) => { this.parseCache.set(uri.toString(), parsed); },
             onDispose:    () => { /* preview self-cleans; navigator has no extra work */ },
             closePicker:  () => this.qp.hide(),
+            storageUri,
         });
     }
 
@@ -220,7 +226,10 @@ class ArtifactNavigator {
             const key = `block:${item.block.heading}`;
             if (key !== this.lastPreviewedUri) {
                 this.lastPreviewedUri = key;
-                this.preview.showPreview(blockAsArtifact(item.block, this.currentArtifact));
+                this.preview.showPreview(
+                    blockAsArtifact(item.block, this.currentArtifact),
+                    { kind: 'multi', heading: item.block.heading },
+                );
             }
             return;
         }
@@ -296,7 +305,7 @@ class ArtifactNavigator {
 
         if (item.block && this.currentArtifact) {
             const blockArtifact = blockAsArtifact(item.block, this.currentArtifact);
-            this.handoffToPreview(blockArtifact);
+            this.handoffToPreview(blockArtifact, { kind: 'multi', heading: item.block.heading });
             return;
         }
 
@@ -317,10 +326,10 @@ class ArtifactNavigator {
     }
 
     /** Hide QP, render artifact in interactive preview, focus the panel. */
-    private handoffToPreview(artifact: ParsedArtifactFile): void {
+    private handoffToPreview(artifact: ParsedArtifactFile, blockRef?: BlockRef): void {
         this.keepPopupOnHide = true;
         this.qp.hide();
-        this.preview.showPreview(artifact);
+        this.preview.showPreview(artifact, blockRef);
         this.preview.reveal(false);
     }
 

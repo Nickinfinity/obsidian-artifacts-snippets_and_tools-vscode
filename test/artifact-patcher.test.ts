@@ -1,5 +1,6 @@
 import * as assert from 'node:assert';
-import { patchFrontmatterField, patchVarDefaults } from '../src/services/artifact-patcher.service.js';
+import { patchBlockCode, patchFrontmatterField, patchVarDefaults } from '../src/services/artifact-patcher.service.js';
+import { parseFromContent } from '../src/services/parser.service.js';
 
 /**
  * Unit tests for the artifact-patcher service.
@@ -483,5 +484,255 @@ suite('patchVarDefaults', () => {
             result.includes('VK-items=products'),
             `expected output to contain "VK-items=products", got:\n${result}`,
         );
+    });
+});
+
+// ── patchBlockCode ────────────────────────────────────────────────────────────
+
+/**
+ * Unit tests for patchBlockCode (VSX-88).
+ *
+ * Contract: swap only the body of the targeted code fence; preserve frontmatter,
+ * the fence info-string, per-block descriptions, sibling blocks, and any ` ```vks `
+ * fences. `parse(patch(x))` must reflect newCode on the targeted block only.
+ *
+ * The function is a throwing stub until VSX-88 is implemented — these tests are
+ * the red baseline.
+ */
+suite('patchBlockCode', () => {
+
+    // ── Single-block ──────────────────────────────────────────────────────────
+
+    test('single: replaces the lone code body and preserves the fence info-string', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            'title: Counter',
+            'language: javascript',
+            '---',
+            '',
+            '```javascript',
+            'const x = 1;',
+            '```',
+        ].join('\n');
+
+        const result = patchBlockCode(content, { kind: 'single' }, 'const y = 2;\nconst z = 3;');
+
+        const expected = [
+            '---',
+            'type: snippet',
+            'title: Counter',
+            'language: javascript',
+            '---',
+            '',
+            '```javascript',
+            'const y = 2;',
+            'const z = 3;',
+            '```',
+        ].join('\n');
+
+        assert.strictEqual(result, expected);
+    });
+
+    test('single: leaves frontmatter and a trailing vars section untouched', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '```code',
+            'echo <VK-message>',
+            '```',
+            '',
+            'vars:',
+            'VK-message=hello',
+        ].join('\n');
+
+        const result = patchBlockCode(content, { kind: 'single' }, 'printf <VK-message>');
+
+        const expected = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '```code',
+            'printf <VK-message>',
+            '```',
+            '',
+            'vars:',
+            'VK-message=hello',
+        ].join('\n');
+
+        assert.strictEqual(result, expected);
+    });
+
+    // ── Multi-block ───────────────────────────────────────────────────────────
+
+    test('multi: patches only the targeted heading and preserves the sibling block', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            'title: API URLs',
+            '---',
+            '',
+            '## Development',
+            'Local dev server.',
+            '```bash',
+            'http://localhost:<VK-PORT>',
+            '```',
+            '',
+            '## Production',
+            '```bash',
+            'https://api.example.com',
+            '```',
+        ].join('\n');
+
+        const result = patchBlockCode(
+            content,
+            { kind: 'multi', heading: 'Production' },
+            'https://api.v2.example.com',
+        );
+
+        const expected = [
+            '---',
+            'type: snippet',
+            'title: API URLs',
+            '---',
+            '',
+            '## Development',
+            'Local dev server.',
+            '```bash',
+            'http://localhost:<VK-PORT>',
+            '```',
+            '',
+            '## Production',
+            '```bash',
+            'https://api.v2.example.com',
+            '```',
+        ].join('\n');
+
+        assert.strictEqual(result, expected);
+    });
+
+    test('multi: preserves a per-block ```vks fence when patching that block', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '## Development',
+            '```bash',
+            'http://localhost:<VK-PORT>',
+            '```',
+            '',
+            '### VKs:',
+            '',
+            '```vks',
+            'VK-PORT=3000',
+            '```',
+            '',
+            '## Production',
+            '```bash',
+            'https://api.example.com',
+            '```',
+        ].join('\n');
+
+        const result = patchBlockCode(
+            content,
+            { kind: 'multi', heading: 'Development' },
+            'http://127.0.0.1:<VK-PORT>',
+        );
+
+        const expected = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '## Development',
+            '```bash',
+            'http://127.0.0.1:<VK-PORT>',
+            '```',
+            '',
+            '### VKs:',
+            '',
+            '```vks',
+            'VK-PORT=3000',
+            '```',
+            '',
+            '## Production',
+            '```bash',
+            'https://api.example.com',
+            '```',
+        ].join('\n');
+
+        assert.strictEqual(result, expected);
+    });
+
+    // ── Target not found ──────────────────────────────────────────────────────
+
+    test('multi: unknown heading returns the content unchanged', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '## Development',
+            '```bash',
+            'echo dev',
+            '```',
+        ].join('\n');
+
+        const result = patchBlockCode(content, { kind: 'multi', heading: 'Nope' }, 'echo changed');
+
+        assert.strictEqual(result, content);
+    });
+
+    // ── Round-trip via parser ─────────────────────────────────────────────────
+
+    test('round-trip single: parse(patch(x)).code equals newCode', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            'language: python',
+            '---',
+            '',
+            '```python',
+            'print("old")',
+            '```',
+        ].join('\n');
+
+        const newCode = 'print("new")\nprint("line2")';
+        const patched = patchBlockCode(content, { kind: 'single' }, newCode);
+        const parsed = parseFromContent(patched, '/vault/Snippets/x.md', '/vault/Snippets');
+
+        assert.strictEqual(parsed.code, newCode);
+    });
+
+    test('round-trip multi: the patched block parses with newCode and the sibling is unchanged', () => {
+        const content = [
+            '---',
+            'type: snippet',
+            '---',
+            '',
+            '## Development',
+            '```bash',
+            'echo dev',
+            '```',
+            '',
+            '## Production',
+            '```bash',
+            'echo prod',
+            '```',
+        ].join('\n');
+
+        const newCode = 'echo production-v2';
+        const patched = patchBlockCode(content, { kind: 'multi', heading: 'Production' }, newCode);
+        const parsed = parseFromContent(patched, '/vault/Snippets/x.md', '/vault/Snippets');
+
+        const dev = parsed.blocks.find(b => b.heading === 'Development');
+        const prod = parsed.blocks.find(b => b.heading === 'Production');
+
+        assert.strictEqual(dev?.code, 'echo dev');
+        assert.strictEqual(prod?.code, newCode);
     });
 });

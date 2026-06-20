@@ -234,7 +234,8 @@ When the user presses Enter on a file in the QuickPick, the picker closes and th
 | Direction | Command | Payload |
 |---|---|---|
 | webview → ext | `insert` | `{ code, vars: Record<string,string> }` |
-| webview → ext | `fullEdit` | — |
+| webview → ext | `fullEdit` | — (opens whole `.md` via `FullEditController`) |
+| webview → ext | `editBlock` | — (opens the previewed block as a temp file via `BlockEditController`) |
 | webview → ext | `cancel` | — |
 | webview → ext | `codeChanged` | `{ code: string }` |
 | ext → webview | `updateRows` | `{ html: string }` — re-rendered highlighted rows |

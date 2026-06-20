@@ -15,6 +15,8 @@ export interface FullEditCallbacks {
     setCache: (uri: vscode.Uri, parsed: ParsedArtifactFile) => void;
     /** Posts a message to the preview webview (or no-op if the panel is gone). */
     postMessage: (msg: unknown) => void;
+    /** Returns the preview panel's view column so the editor opens as a tab beside it (same group). */
+    getViewColumn: () => vscode.ViewColumn | undefined;
 }
 
 /**
@@ -53,7 +55,8 @@ export class FullEditController {
      */
     start(fileUri: vscode.Uri): void {
         this.teardown();
-        void vscode.window.showTextDocument(fileUri, { viewColumn: vscode.ViewColumn.Beside, preserveFocus: false });
+        const column = this.cb.getViewColumn() ?? vscode.ViewColumn.Beside;
+        void vscode.window.showTextDocument(fileUri, { viewColumn: column, preserveFocus: false });
 
         const uriKey = fileUri.toString();
         this.subs.push(

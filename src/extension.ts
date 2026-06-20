@@ -4,6 +4,7 @@ import { registerInsertCommands } from './commands/insert.command.js';
 import { registerCreateCommands } from './commands/create.command.js';
 import { refreshVaultContext } from './services/context.service.js';
 import { createVaultDirectory } from './services/vault.service.js';
+import { sweepBlockEditOrphans } from './ui/panels/artifactPicker/blockEditor.js';
 import { ARTIFACTS } from './types/constants.js';
 
 /**
@@ -20,6 +21,9 @@ export async function activate(context: vscode.ExtensionContext) {
 	registerOpenSettingsCommand(context);
 	registerInsertCommands(context);
 	registerCreateCommands(context);
+
+	// Clean up any block-edit temp files orphaned by a previous crash / hard-close.
+	void sweepBlockEditOrphans(context.storageUri ?? context.globalStorageUri);
 
 	// Await context key setup — ensures menus reflect vault state before first user interaction.
 	// Without await the keys land asynchronously and the first right-click may show no items.

@@ -72,11 +72,15 @@ export function artifactCommandId(dir: string): string {
 export function registerInsertCommands(context: vscode.ExtensionContext): void {
     // One iteration per artifact — command ID and display name come entirely from ARTIFACTS.
     // No artifact name, dir, or label is hardcoded in this file.
+    // storageUri is workspace-scoped (undefined with no folder open) — fall back to
+    // the always-defined globalStorageUri so block-edit temp files have a home.
+    const storageUri = context.storageUri ?? context.globalStorageUri;
+
     for (const artifact of ARTIFACTS) {
         const commandId = artifactCommandId(artifact.dir);
 
         const disposable = vscode.commands.registerCommand(commandId, () => {
-            void openArtifactPicker(artifact.dir, artifact.name, context.extensionUri);
+            void openArtifactPicker(artifact.dir, artifact.name, context.extensionUri, storageUri);
         });
 
         context.subscriptions.push(disposable);

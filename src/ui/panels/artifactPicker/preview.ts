@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { parseFromContent } from '../../../services/parser.service.js';
 import { renderCodeHtml, renderCodeRowsHtml } from '../../../services/render.service.js';
-import { patchFrontmatterField, patchVarDefaults } from '../../../services/artifact-patcher.service.js';
+import { patchFrontmatterField, patchVarDefaults, type BlockRef } from '../../../services/artifact-patcher.service.js';
 import { PreviewModeController, type SectionKey } from '../../../services/preview-mode.service.js';
 import { getNonce } from '../../../utils/helpers.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
@@ -16,6 +16,7 @@ import {
 } from './preview.helpers.js';
 import { buildCodeBlockHtml, CODE_BLOCK_CLIENT_JS } from './codeBlock.js';
 import { FullEditController } from './fullEditor.js';
+import { BlockEditController } from './blockEditor.js';
 import { VarSetController } from './varSetController.js';
 
 // Re-export the adapter so the navigator does not need to import preview.helpers directly.
@@ -32,6 +33,8 @@ export interface PreviewCallbacks {
     onDispose: () => void;
     /** Closes the QuickPick (called from `handleInsert`). */
     closePicker: () => void;
+    /** Extension storage dir for block-edit temp files (`context.storageUri ?? globalStorageUri`). */
+    storageUri: vscode.Uri;
 }
 
 /**
@@ -51,8 +54,11 @@ export class PreviewPanelController {
     private currentArtifact: ParsedArtifactFile | undefined;
     private modeController: PreviewModeController | undefined;
     private msgSub: vscode.Disposable | undefined;
-    private readonly fullEdit: FullEditController;
-    private readonly varSet:   VarSetController;
+    private readonly fullEdit:  FullEditController;
+    private readonly blockEdit: BlockEditController;
+    private readonly varSet:    VarSetController;
+    /** Which code fence the Edit Block action targets; updated on each `showPreview`. */
+    private currentBlockRef: BlockRef = { kind: 'single' };
 
     constructor(private readonly cb: PreviewCallbacks) {
         this.fullEdit = new FullEditController({
@@ -61,6 +67,16 @@ export class PreviewPanelController {
             setCurrentArtifact:  a => { this.currentArtifact = a; },
             setCache:            cb.setCache,
             postMessage:         msg => { void this.panel?.webview.postMessage(msg); },
+            getViewColumn:       () => this.panel?.viewColumn,
+        });
+        this.blockEdit = new BlockEditController({
+            rootFs:              cb.rootFs,
+            storageUri:          cb.storageUri,
+            getCurrentArtifact:  () => this.currentArtifact,
+            setCurrentArtifact:  a => { this.currentArtifact = a; },
+            setCache:            cb.setCache,
+            postMessage:         msg => { void this.panel?.webview.postMessage(msg); },
+            getViewColumn:       () => this.panel?.viewColumn,
         });
         this.varSet = new VarSetController(cb.extensionUri, {
             getCurrentArtifact: () => this.currentArtifact,
@@ -94,11 +110,16 @@ export class PreviewPanelController {
     /**
      * Creates (once per session) or updates the popup in interactive preview mode.
      *
-     * @param artifact - Single-block artifact to display.
+     * @param artifact - Single-block artifact (or block-adapted artifact) to display.
+     * @param blockRef - Which source `.md` code fence the Edit Block action targets.
+     *                   Defaults to `{ kind: 'single' }`; pass `{ kind: 'multi', heading }`
+     *                   when previewing a block of a multi-block file.
      */
-    showPreview(artifact: ParsedArtifactFile): void {
+    showPreview(artifact: ParsedArtifactFile, blockRef?: BlockRef): void {
         this.fullEdit.teardown();
+        void this.blockEdit.teardown();
         this.currentArtifact = artifact;
+        this.currentBlockRef = blockRef ?? { kind: 'single' };
         this.modeController  = new PreviewModeController(artifact.code);
 
         if (!this.ensurePanel()) { return; }
@@ -153,6 +174,7 @@ export class PreviewPanelController {
             );
             this.panel.onDidDispose(() => {
                 this.fullEdit.teardown();
+                void this.blockEdit.teardown();
                 this.msgSub?.dispose();
                 this.msgSub          = undefined;
                 this.panel           = undefined;
@@ -190,6 +212,7 @@ export class PreviewPanelController {
         else if (cmd === 'quickEdit')     { this.modeController?.enterQuickEdit(); }
         else if (cmd === 'backToPreview') { this.modeController?.enterPreview(); }
         else if (cmd === 'fullEdit')      { this.handleFullEdit(); }
+        else if (cmd === 'editBlock')     { await this.handleEditBlock(); }
         else if (cmd === 'saveSection')   { await this.handleSaveSection(msg); }
         else if (cmd === 'insert')        { this.handleInsert(msg); }
         else if (cmd === 'cancel')        { this.dispose(); }
@@ -205,6 +228,22 @@ export class PreviewPanelController {
         if (!artifact) { return; }
         this.modeController?.enterFullEdit();
         this.fullEdit.start(vscode.Uri.file(artifact.filePath));
+    }
+
+    /**
+     * Opens just the previewed code block as a temp file in extension storage.
+     * Saving that file patches the matching code fence in the source `.md` and
+     * refreshes the preview via a `fileUpdated` round-trip.
+     */
+    private async handleEditBlock(): Promise<void> {
+        const artifact = this.currentArtifact;
+        if (!artifact) { return; }
+        await this.blockEdit.start(
+            artifact,
+            this.currentBlockRef,
+            artifact.code,
+            artifact.frontmatter.language,
+        );
     }
 
     private async handleSaveSection(msg: Record<string, unknown>): Promise<void> {
@@ -242,6 +281,7 @@ export class PreviewPanelController {
 
         performInsert(this.cb.targetEditor, { ...artifact, code }, resolvedVars);
         this.fullEdit.teardown();
+        void this.blockEdit.teardown();
         this.dispose();
         this.cb.closePicker();
     }
@@ -355,6 +395,7 @@ function renderPreviewHtml(
   </div>
   <div class="actions">
     <button class="btn btn-insert"    id="insertBtn">Insert</button>
+    <button class="btn btn-secondary" id="editBlockBtn">Edit Block</button>
     <button class="btn btn-secondary" id="editBtn">Edit .md</button>
     <button class="btn btn-cancel"    id="cancelBtn">Cancel</button>
   </div>
@@ -374,6 +415,9 @@ function renderPreviewHtml(
   document.getElementById('insertBtn').addEventListener('click', function () {
     window.__codeBlock.flushPendingRender();
     vscode.postMessage({ command: 'insert', vars: collectVars(), code: window.__codeBlock.extractCode() });
+  });
+  document.getElementById('editBlockBtn').addEventListener('click', function () {
+    vscode.postMessage({ command: 'editBlock' });
   });
   document.getElementById('editBtn').addEventListener('click', function () {
     vscode.postMessage({ command: 'fullEdit' });
