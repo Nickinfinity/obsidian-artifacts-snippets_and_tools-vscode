@@ -24,8 +24,10 @@ count the orchestrator has not re-verified itself. P5, P8 and P9 are not
 delegated wholesale — see the dispatch-notes table.
 
 > **RESUME HERE:** Phase 3 — One config reader. P0, P1 and P2 are landed and
-> pushed; gate green at **456**. Start by re-grepping P3's Evidence: the six
-> vault-path reads and the ten `'obsidianArtifacts'` literals.
+> pushed; gate green at **456**. **Read the plan's "AUDIT — state after P0-P2"
+> section first** — it re-verifies the done-when conditions, corrects P3's
+> evidence (**eight** vault-path reads, not six), and assigns the leftover
+> minor Sonar warnings to their owning phases.
 
 - [x] **P0 Baseline** — branch + `.vscode-test.mjs` T1 fix + gate + commit these three plan files + push
 - [x] **P1** Shared pure helpers (`escHtml` · slug · `VK_TOKEN_RE` · `getNonce` JSDoc) — depends P0

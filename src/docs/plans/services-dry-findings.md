@@ -305,4 +305,39 @@ they add.**
   red, then restore. Cheap, and the only thing that distinguishes a real drift
   guard from a decorative one.
 
+---
+
+## Plan maintenance — P0-P2 audit + orchestrator/subagent hardening (no code changes)
+
+### Discovered
+
+- All P1/P2 done-when conditions hold in the tree at `ebb55e3` (re-verified by
+  grep, gate 456). Ledger and `git log` agree.
+- **P3's evidence was undercounted — the third plan-evidence error in three
+  phases.** Eight vault-path reads exist, not six (missed `extension.ts:48` and
+  `context.service.ts:104`); eleven `'obsidianArtifacts'` literals, not ten.
+  P3's spec is corrected in place.
+- Five gate-passing IDE/Sonar warnings inventoried and assigned to owning
+  phases (S7772→P3, S7763/S7780/S7781→P6, S8786 pre-existing → leave unless
+  touched). See the plan's audit table.
+
+### Changed (plan files only)
+
+- Appended **"AUDIT — state after P0-P2"** to `services-dry.md` before P3.
+- Orchestration: added **Plan maintenance** authority — the Opus orchestrator
+  must refresh stale evidence, may split heavy phases into multiple Sonnet
+  dispatches (mechanical-vs-judgement, or file-disjoint parallel slices), must
+  promote mid-run discoveries into phases or skips, and must record every plan
+  edit here.
+- Guiding Principles: added explicit **TDD** (guard tests proven to fail) and
+  **DDD** (services own domain logic; vscode-free types; webview messages are
+  trust boundaries) paragraphs; skill-stack mandate now names the orchestrator
+  explicitly alongside subagents.
+
+### Rule learned
+
+- **Evidence decays at a measurable rate here (~1 error per phase).** The
+  orchestrator's pre-dispatch re-grep is not a formality — it has caught a real
+  divergence every single time it has been run.
+
 <!-- one entry appended per phase as the run proceeds -->

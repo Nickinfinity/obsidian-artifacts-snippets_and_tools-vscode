@@ -139,6 +139,19 @@ One file / one concern, one function / one job. **No abstraction without a
 second concrete caller today** — a helper extracted for one caller is
 over-engineering, note the skip instead.
 
+**TDD.** The failing test comes before the refactor (inner-loop step 1). A new
+test that contradicts the green suite is presumed wrong — the unchanged
+existing suite is the authority on current behaviour. Guard tests must be
+*proven to fail* by reintroducing the bug they guard against (see the P2
+findings entry for the worked example).
+
+**DDD.** Domain logic lives in `src/services/`; commands and panels stay thin
+wiring. `src/types/` stays free of `vscode` types (adapt at the edges). Names
+come from the artifact domain — artifact, block, var set, vault, frontmatter —
+never from the UI surface that happens to call them. A webview message is a
+**trust boundary**: data crossing it is untrusted input and keeps its guard
+(see P2's `panel.ts` finding).
+
 **Behavior invariant.** As stated above. Prove preservation; never assume it.
 
 **Security.** This extension renders webviews and touches the filesystem, so:
@@ -150,7 +163,8 @@ keep the vault path-escape guard at `artifact-writer.service.ts:127`
 keep going through `filename.service.ts` validators — no raw user string
 becomes a path segment. No `child_process` exists in this repo; do not add one.
 
-**Tooling — the skill stack, mandatory for every executing agent:**
+**Tooling — the skill stack, mandatory for every executing agent — the Opus
+orchestrator itself as much as every Sonnet subagent:**
 - `Skill caveman` — terse output, on every prompt.
 - `Skill ponytail` — reuse before writing, shortest working diff, delete over
   add, no speculative abstraction. On every prompt.
@@ -208,6 +222,33 @@ getting them wrong corrupts the record rather than just the code:
    prove a CSS split is loss-free by selector diff. Run them inline as Opus, or
    split them into a mechanical half (capture goldens / move rules) that Sonnet
    can do and a verification half that Opus keeps.
+
+### Plan maintenance — the orchestrator OWNS these plan files
+
+The plans are living documents and the tree always wins. The Opus orchestrator
+must — not merely may — edit the plan set when reality diverges:
+
+- **Refresh stale evidence.** When a re-grep shows a `file:line` moved or a
+  smell already fixed, correct the phase spec *before* dispatching. Every run
+  so far has found plan errors (P1: a third `escHtml` the inventory missed;
+  P2: six "identical" call sites in three different trust contexts) — expect
+  more, and fold each into the spec the next subagent receives.
+- **Split heavy phases into multiple Sonnet dispatches.** When a phase's diff
+  is too large for one reliable subagent pass, cut it along one of two seams:
+  *mechanical vs judgement* (Sonnet does the bulk move, Opus does the decision
+  half — the P5/P8 pattern), or *file-disjoint slices* dispatched in parallel
+  (only when the slices share **no** file — re-derive from the Touches lists,
+  and update the ledger's shared-file table if the split changes it). E.g. P6
+  splits naturally into three **serial** Sonnet dispatches (renderer move →
+  client-JS extraction → shared-snippet collapse) — serial because all three
+  touch `preview.ts`.
+- **Promote discoveries.** New smells found mid-run become either a new phase
+  (inserted with full Touches/Evidence/Do/TDD/Done-when), an addition to an
+  existing phase that owns those files, or an explicit skip-with-reason in
+  §Skips. Never leave a discovery only in a subagent's report.
+- **Record every plan edit** in the findings log (what changed, why) and commit
+  it with the phase it belongs to. A plan edited silently is worse than a plan
+  left stale — the next resume can't tell which version the commits followed.
 
 ### The per-phase inner loop — run this verbatim, every phase
 
@@ -476,6 +517,66 @@ read it, do not assume this line is current.
   `artifact-type-config.service.ts`; `VALID_TYPES` contains no literals; gate
   green, count ≥ previous.
 
+### ⏸ AUDIT — state after P0-P2 (read this before dispatching P3)
+
+Independent re-verification against the tree at `ebb55e3`, gate green at
+**456** (`rm -rf dist && pnpm test`, exit 0).
+
+**Done-when conditions re-verified by grep — all hold:**
+
+| Check | Result |
+|---|---|
+| `escHtml` definitions in TS | 1 — `src/utils/html.ts` (the string copy inside `codeBlock.ts:60`'s client JS is P6 scope, expected) |
+| Slug functions | 1 — `filename.service.slugify` |
+| `VK_TOKEN_RE` declarations | 1 — exported from `parser.service.ts` |
+| `ARTIFACTS.find` outside the accessor | 0 |
+| `VALID_TYPES` | derived via `getAllTypes()`; drift guard proven to fail (P2 findings) |
+| Import cycle parser → type-config → constants | none — `constants.ts` imports types only |
+| Ledger vs `git log` | agree: `4709ec5` → `02270da` → `2516204` |
+
+**What P0-P2 changed beyond the letter of the plan** (all recorded in the
+findings log — the next orchestrator inherits these as fact, not rumour):
+
+1. A **third** `escHtml` existed (`render.service.ts`, 4-char, no `'`). Merged
+   into the 5-char version. Recon inventories should grep implementation
+   *bodies*, not just names.
+2. `getNonce` moved from `Math.random()` to `node:crypto randomInt` (S2245 —
+   CSP nonces must be unpredictable). Out-of-scope find, fixed in place.
+3. `panel.ts` save handler keeps a `try/catch` around `getEntry` because
+   `model.type` crosses the webview boundary — the one call site where a miss
+   is *reachable* and must stay a user-facing error, not a throw.
+4. `panel.ts:200,210`'s old `?? 'block'` / `?? 'artifact'` fallback nouns were
+   removed as unreachable (opts.type is create-form-enabled by construction).
+   If a future phase makes them reachable, `getTypeSingular` will throw — which
+   is the designed loud failure, not a regression.
+
+**Known minor findings left on the table** (gate-passing IDE/Sonar warnings —
+each assigned so it is fixed by the phase that owns the file, not hunted twice):
+
+| Warning | Site | Owned by |
+|---|---|---|
+| S7772 `'path'` → `'node:path'` | `varSetController.ts:2` | P3 (touches file) |
+| S7763 re-export via `export…from` | `preview.ts:23` | P6 |
+| S7780 `String.raw` for escaped `\\` | `codeBlock.ts:45` | P6 |
+| S7781 `split().join()` → `replaceAll` | `form.blocks.ts:84` | P6 (D6 collapse rewrites that line) |
+| S8786 super-linear regex (pre-existing) | `parser.service.ts:166` | Fix only if a phase touches `parseVars`; else leave — not this refactor's job |
+
+**Handoff warnings for the orchestrator:**
+
+- The evidence tables have been wrong twice in two phases (undercounts, false
+  equivalences). Re-grep before every dispatch; treat a suspiciously clean
+  subagent report as a signal to verify harder, not to relax.
+- The working tree may carry an unstaged deletion of
+  `authoring-refactor-plans.md` (the meta-plan used to author this set). That
+  is the user's local change — do not commit or revert it as a side effect of a
+  phase commit; stage plan/source files explicitly.
+- **P3's evidence was undercounted — corrected below.** The audit re-grep found
+  **8** vault-path reads, not the six D4 cited (missed: `extension.ts:48`, the
+  config-change re-read, and `context.service.ts:104`), and **11**
+  `'obsidianArtifacts'` literals across the same files. The P3 spec's Evidence
+  line is updated to the full list; the third plan-evidence error in three
+  phases — keep re-grepping.
+
 ### Phase 3 — One config reader
 
 - **Touches:** `src/services/config.service.ts` (new), `src/extension.ts`,
@@ -486,11 +587,14 @@ read it, do not assume this line is current.
   `src/services/context.service.ts`.
   **Depends:** P2 (shares `panel.ts`, `create.command.ts`,
   `varSetController.ts`). **Parallel-safe:** no.
-- **Evidence:** D4 — six vault-path reads at `extension.ts:34`,
-  `settings.panel.ts:45`, `navigator.ts:33`, `varSetController.ts:192`,
-  `panel.ts:241`, `create.command.ts:114`; `'obsidianArtifacts'` at ten sites
-  including `context.service.ts:103`, `extension.ts:45,47`,
-  `settings.panel.ts:84,125`.
+- **Evidence (corrected by the P0-P2 audit — re-grep before cutting):** D4 —
+  **eight** vault-path reads: `extension.ts:35,48`, `settings.panel.ts:46`,
+  `navigator.ts:34`, `varSetController.ts:195`, `panel.ts:242`,
+  `create.command.ts:114`, `context.service.ts:104`. Eleven
+  `'obsidianArtifacts'` literals: the ten `getConfiguration` sites
+  (`extension.ts:34,47`, `settings.panel.ts:45,84,125`, `navigator.ts:33`,
+  `varSetController.ts:194`, `panel.ts:241`, `create.command.ts:113`,
+  `context.service.ts:103`) plus `affectsConfiguration` at `extension.ts:45`.
 - **Do:** create `src/services/config.service.ts` exporting
   `CONFIG_SECTION = 'obsidianArtifacts'`, `getVaultPath(): string` (trimmed),
   `getVaultRootUri(): vscode.Uri | undefined`, and
@@ -498,7 +602,8 @@ read it, do not assume this line is current.
   `affectsConfiguration` call at `extension.ts:45`. Replace every site.
   **Do not** invent setters or a generic get/set wrapper — `settings.panel.ts`
   is the only writer and has two `update` calls; leave them, just source the
-  section name from `CONFIG_SECTION`.
+  section name from `CONFIG_SECTION`. While in `varSetController.ts`, also fix
+  the S7772 warning the audit assigned here (`'path'` → `'node:path'`).
 - **TDD:** the module is `vscode`-dependent, so behaviour is covered by the
   existing suite. Add no fake-vscode harness — that is scaffolding this repo
   does not have. Confirm the existing settings/context tests still pass and note
