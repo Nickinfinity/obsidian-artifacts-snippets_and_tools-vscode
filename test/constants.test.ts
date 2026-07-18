@@ -1,5 +1,7 @@
 import * as assert from 'node:assert';
 import { ARTIFACTS } from '../src/types/constants.js';
+import { getAllTypes } from '../src/services/artifact-type-config.service.js';
+import { parseFromContent } from '../src/services/parser.service.js';
 import type { ArtifactType } from '../src/types/parsed-artifact.types.js';
 
 /**
@@ -119,5 +121,38 @@ suite('ARTIFACTS per-type form config', () => {
                     `entry ${entry.dir} is locked but has no language.default`);
             }
         }
+    });
+});
+
+// ── Drift guard: ARTIFACTS ↔ parser (services-dry Phase 2) ───────────────────
+
+/**
+ * `parser.service.ts` used to carry its own hardcoded set of the five valid
+ * `type:` values. A type added to ARTIFACTS but missing from that list was
+ * *silently* downgraded to 'snippet' on parse — no error, no warning, just
+ * wrong data. VALID_TYPES is now derived, and this suite is what keeps the two
+ * bound: it fails loudly if any future change re-hardcodes the list.
+ */
+suite('ARTIFACTS ↔ parser type agreement', () => {
+
+    /**
+     * @example
+     * parseFromContent('---\ntype: variables\n---\n').frontmatter.type === 'variables'
+     */
+    test('the parser accepts every type declared in ARTIFACTS', () => {
+        for (const entry of ARTIFACTS) {
+            const parsed = parseFromContent(`---\ntype: ${entry.type}\n---\n`, '/v/x.md', '/v');
+            assert.strictEqual(parsed.frontmatter.type, entry.type,
+                `parser rejected declared type '${entry.type}' and fell back to '${parsed.frontmatter.type}'`);
+        }
+    });
+
+    test('an undeclared type still falls back to snippet', () => {
+        const parsed = parseFromContent('---\ntype: not-a-real-type\n---\n', '/v/x.md', '/v');
+        assert.strictEqual(parsed.frontmatter.type, 'snippet');
+    });
+
+    test('getAllTypes covers ARTIFACTS exactly — no extras, no omissions', () => {
+        assert.deepStrictEqual([...getAllTypes()].sort(), ARTIFACTS.map(e => e.type).sort());
     });
 });

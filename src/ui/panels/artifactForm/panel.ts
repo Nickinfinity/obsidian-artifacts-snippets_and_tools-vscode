@@ -9,7 +9,7 @@ import { pickDestFolder } from '../destFolderPicker.panel.js';
 import { validateArtifactFilename, deriveFileName } from '../../../services/filename.service.js';
 import { extractVars } from '../../../services/parser.service.js';
 import { getNonce } from '../../../utils/helpers.js';
-import { ARTIFACTS } from '../../../types/constants.js';
+import { getEntry, getTypeSingular } from '../../../services/artifact-type-config.service.js';
 import { renderCodeRowsHtml } from '../../../services/render.service.js';
 import { buildCodeBlockHtml } from '../artifactPicker/codeBlock.js';
 import type { ArtifactType } from '../../../types/parsed-artifact.types.js';
@@ -104,8 +104,8 @@ class ArtifactFormController {
      * controller.open();
      */
     open(): void {
-        const entry = ARTIFACTS.find(a => a.type === this.opts.type);
-        const title = `Obsidian Artifacts: Create ${entry?.name ?? this.opts.type}`;
+        // opts.type always comes from getCreateFormTypes(), so the lookup cannot miss.
+        const title = `Obsidian Artifacts: Create ${getEntry(this.opts.type).name}`;
 
         this.panel = vscode.window.createWebviewPanel(
             FORM_VIEW_TYPE,
@@ -197,7 +197,7 @@ class ArtifactFormController {
     }
 
     private async handleRemoveBlock(blockIndex: number): Promise<void> {
-        const singular = ARTIFACTS.find(a => a.type === this.opts.type)?.form?.label.singular ?? 'block';
+        const singular = getTypeSingular(this.opts.type);
         const answer   = await vscode.window.showWarningMessage(
             `This ${singular} block will be deleted. Continue?`,
             { modal: true },
@@ -207,7 +207,7 @@ class ArtifactFormController {
     }
 
     private async handleDeleteEntire(): Promise<void> {
-        const singular = ARTIFACTS.find(a => a.type === this.opts.type)?.form?.label.singular ?? 'artifact';
+        const singular = getTypeSingular(this.opts.type);
         const answer   = await vscode.window.showWarningMessage(
             `Delete entire ${singular}? All unsaved changes will be lost.`,
             { modal: true },
@@ -246,14 +246,19 @@ class ArtifactFormController {
             return;
         }
 
-        const entry = ARTIFACTS.find(a => a.type === model.type);
-        if (!entry) {
+        // `model` crosses the webview boundary, so its type is untrusted here —
+        // unlike opts.type elsewhere in this file. getEntry throws on an
+        // unrecognised type; convert that into the user-facing save error.
+        let baseDirName: string;
+        try {
+            baseDirName = getEntry(model.type).dir;
+        } catch {
             this.post({ command: 'saveResult', ok: false, error: 'Unknown artifact type.' });
             return;
         }
 
         const vaultRoot = vscode.Uri.file(vaultPath);
-        const baseDir   = vscode.Uri.joinPath(vaultRoot, entry.dir);
+        const baseDir   = vscode.Uri.joinPath(vaultRoot, baseDirName);
 
         // Step 1: destination folder
         const chosenDir = await pickDestFolder(baseDir);

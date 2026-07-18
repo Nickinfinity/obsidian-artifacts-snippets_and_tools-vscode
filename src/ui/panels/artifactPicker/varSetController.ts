@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { applyVarSet } from '../../../services/varset.service.js';
 import { slugify } from '../../../services/filename.service.js';
-import { ARTIFACTS } from '../../../types/constants.js';
+import { getEntry } from '../../../services/artifact-type-config.service.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { ApplyResult, VarSubSet } from '../../../types/varset.types.js';
 import { getVarSetScanner, pickVarSet } from '../varsetPicker.panel.js';
@@ -195,8 +195,7 @@ function getVariablesDirUri(): vscode.Uri | null {
         .get<string>('vaultPath', '')
         .trim();
     if (vaultPath.length === 0) { return null; }
-    const variablesDir = ARTIFACTS.find(a => a.dir === 'Variables')?.dir ?? 'Variables';
-    return vscode.Uri.file(path.join(vaultPath, variablesDir));
+    return vscode.Uri.file(path.join(vaultPath, getEntry('variables').dir));
 }
 
 /**

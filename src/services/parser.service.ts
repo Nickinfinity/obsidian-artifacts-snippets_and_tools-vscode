@@ -1,9 +1,13 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { getAllTypes } from './artifact-type-config.service.js';
 import type { ArtifactType, ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar } from '../types/parsed-artifact.types.js';
 
 // Accepted `type` values — any unrecognised value keeps the 'snippet' fallback.
-const VALID_TYPES = new Set<string>(['snippet', 'template', 'command', 'agent', 'variables']);
+// Derived from ARTIFACTS so a type added there is accepted here immediately;
+// as a hardcoded list this silently downgraded unlisted types to 'snippet'.
+// Guarded by the drift test in test/constants.test.ts.
+const VALID_TYPES = new Set<string>(getAllTypes());
 
 // Frontmatter keys copied verbatim into `ParsedFrontmatter` (string-typed).
 const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);

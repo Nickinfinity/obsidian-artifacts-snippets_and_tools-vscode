@@ -17,13 +17,13 @@ compiled test keeps running and *inflates* the pass count (phantom green).
 automatically every phase. **Never open the PR** — Finalize prepares the body
 and stops; the PR is opened only on the user's explicit request.
 
-> **RESUME HERE:** Phase 2 — One artifact-type accessor. P0 and P1 are landed
-> and pushed; gate green at **447**. Start by re-grepping P2's Evidence: the six
-> `ARTIFACTS.find` sites and `VALID_TYPES` at `parser.service.ts:6`.
+> **RESUME HERE:** Phase 3 — One config reader. P0, P1 and P2 are landed and
+> pushed; gate green at **456**. Start by re-grepping P3's Evidence: the six
+> vault-path reads and the ten `'obsidianArtifacts'` literals.
 
 - [x] **P0 Baseline** — branch + `.vscode-test.mjs` T1 fix + gate + commit these three plan files + push
 - [x] **P1** Shared pure helpers (`escHtml` · slug · `VK_TOKEN_RE` · `getNonce` JSDoc) — depends P0
-- [ ] **P2** One artifact-type accessor (`getEntry`; `VALID_TYPES` derived) — depends P1
+- [x] **P2** One artifact-type accessor (`getEntry`; `VALID_TYPES` derived) — depends P1
 - [ ] **P3** One config reader (`config.service.ts`) — depends P2
 - [ ] **P4** Language tables: derive `MAP`, add consistency test, resolve objc drift — depends P1 (parallel-safe vs P3)
 - [ ] **P5** One `.md` writer — golden-lock first — depends P1, P2, P3
@@ -37,7 +37,8 @@ Gate log:
 | Phase | Result | Pass count | Commit |
 |---|---|---|---|
 | P0 | baseline | 433 | `4709ec5` |
-| P1 | green | **447** (−4 relocated, +6 relocated, +12 new) | _see next commit_ |
+| P1 | green | **447** (−4 relocated, +6 relocated, +12 new) | `02270da` |
+| P2 | green | **456** (+9: getEntry, getAllTypes, drift guard) | _this commit_ |
 
 **Gotcha — shared files force serial execution.** Derived from the phases'
 `Touches` lists:

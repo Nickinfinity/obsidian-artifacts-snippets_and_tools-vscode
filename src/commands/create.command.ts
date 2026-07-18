@@ -1,6 +1,5 @@
 import * as vscode from 'vscode';
-import { ARTIFACTS } from '../types/constants.js';
-import { getCreateFormTypes } from '../services/artifact-type-config.service.js';
+import { getCreateFormTypes, getEntry } from '../services/artifact-type-config.service.js';
 import { validateObsidianVault } from '../services/vault.service.js';
 import { openArtifactFormPanel } from '../ui/panels/artifactForm/panel.js';
 import { mapLanguageId } from '../services/language-map.service.js';
@@ -64,14 +63,14 @@ interface TypePickItem extends vscode.QuickPickItem {
  * buildTypeItems() // [{ label: '$(add) Create Snippet', detail: 'Snippets', artifactType: 'snippet' }, ...]
  */
 function buildTypeItems(): TypePickItem[] {
-    return getCreateFormTypes().flatMap(type => {
-        const entry = ARTIFACTS.find(a => a.type === type);
-        if (!entry) { return []; }
-        return [{
+    // Every type here came from getCreateFormTypes(), so getEntry cannot miss.
+    return getCreateFormTypes().map(type => {
+        const entry = getEntry(type);
+        return {
             label:        `$(add) Create ${entry.name}`,
             detail:       entry.dir,
             artifactType: type,
-        }];
+        };
     });
 }
 

@@ -242,4 +242,67 @@ against `slugify`.
   Worth keeping the reviewer step (inner loop #3) pointed at the *whole*
   changed file, not just the changed lines.
 
+---
+
+## Phase 2 — One artifact-type accessor
+
+### Discovered
+
+- **The six call sites were not equivalent, and collapsing them blindly would
+  have changed behaviour.** Three fell into two distinct trust classes:
+  - `panel.ts:107,200,210` and `create.command.ts:68` take `opts.type` /
+    `getCreateFormTypes()` output — **always** valid by construction. Their
+    `?? 'block'` / `?? 'artifact'` / `if (!entry) return []` fallbacks were
+    unreachable defensive code, now removed.
+  - `panel.ts:249` takes `model.type` **from a webview message** — a genuine
+    trust boundary — and converts a miss into a user-facing
+    `'Unknown artifact type.'` save error. Replacing that with a bare throwing
+    `getEntry` would have turned a handled error into an unhandled rejection in
+    an async message handler, with nothing shown to the user. It keeps a
+    `try/catch` that preserves the exact prior behaviour.
+- `varSetController`'s no-op (`ARTIFACTS.find(a => a.dir === 'Variables')?.dir
+  ?? 'Variables'`) confirmed dead as described and deleted.
+- Added `getAllTypes()` rather than importing `ARTIFACTS` into
+  `parser.service.ts` directly — keeps constants access inside the one accessor
+  module and gives the drift test something to assert against.
+
+### Changed
+
+- `findEntry` → exported `getEntry`; it is now the only by-type traversal of
+  `ARTIFACTS` in `src/` (verified by grep, and its JSDoc no longer claims an
+  exclusivity it does not have — the claim is now enforced by tests).
+- Deleted `artifact-writer.findBaseDir` (a character-identical duplicate,
+  including its error string).
+- `panel.ts:200,210` now use `getTypeSingular`.
+- `VALID_TYPES` derived via `getAllTypes()`.
+
+### Improved (metrics)
+
+| Metric | Before | After |
+|---|---|---|
+| Tests passing | 447 | **456** |
+| `ARTIFACTS.find` sites outside the accessor | 6 | **0** |
+| Modules importing `ARTIFACTS` | 9 | 5 (all whole-array iteration, no by-type lookup) |
+| Hardcoded artifact-type lists | 2 | 1 (`ARTIFACTS` itself) |
+
+### Verification beyond the gate
+
+**The drift guard was proven to fail.** A guard test that cannot fail is
+worthless, so `VALID_TYPES` was temporarily reverted to a hardcoded list
+omitting `variables`, and the new suite was run: it failed with
+`parser rejected declared type 'variables' and fell back to 'snippet'` — the
+exact silent bug R1 described. The derived version was then restored and the
+full gate re-run green. **Later phases should do the same for any guard test
+they add.**
+
+### Rule learned
+
+- **A duplicated call site is not automatically a duplicate.** Six textually
+  identical `ARTIFACTS.find` calls sat in three different correctness contexts
+  (guaranteed-valid, untrusted-input, and dead). DRY collapses the *lookup*, not
+  the *error handling around it* — the trust boundary keeps its own guard.
+- **Prove the guard fails.** Reintroduce the exact bug, watch the new test go
+  red, then restore. Cheap, and the only thing that distinguishes a real drift
+  guard from a decorative one.
+
 <!-- one entry appended per phase as the run proceeds -->

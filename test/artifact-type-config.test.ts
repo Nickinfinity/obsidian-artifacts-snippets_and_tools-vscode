@@ -1,5 +1,7 @@
 import * as assert from 'node:assert';
 import {
+    getAllTypes,
+    getEntry,
     getFormConfig,
     getLanguageMode,
     getDefaultLanguage,
@@ -7,6 +9,7 @@ import {
     canMultiBlock,
     getCreateFormTypes,
 } from '../src/services/artifact-type-config.service.js';
+import { ARTIFACTS } from '../src/types/constants.js';
 import type { ArtifactType } from '../src/types/parsed-artifact.types.js';
 
 /**
@@ -129,6 +132,56 @@ suite('artifact-type-config.service', () => {
         test('returns exactly [snippet, command] (order-insensitive)', () => {
             const sorted = [...getCreateFormTypes()].sort();
             assert.deepStrictEqual(sorted, ['command', 'snippet']);
+        });
+    });
+
+    // ── getEntry / getAllTypes (services-dry Phase 2) ─────────────────────────
+
+    suite('getEntry', () => {
+
+        /**
+         * @example
+         * getEntry('snippet').dir === 'Snippets'
+         */
+        test('returns the matching entry for every declared type', () => {
+            for (const entry of ARTIFACTS) {
+                assert.strictEqual(getEntry(entry.type), entry,
+                    `getEntry('${entry.type}') did not return its ARTIFACTS entry`);
+            }
+        });
+
+        test('exposes dir and name for a create-form type', () => {
+            assert.strictEqual(getEntry('snippet').dir, 'Snippets');
+            assert.strictEqual(getEntry('command').dir, 'Commands');
+        });
+
+        test('works for non-create-form types too (unlike getFormConfig)', () => {
+            assert.strictEqual(getEntry('variables').dir, 'Variables');
+            assert.strictEqual(getEntry('agent').dir, 'AgentsConf');
+        });
+
+        test('throws on an unknown type rather than returning undefined', () => {
+            assert.throws(
+                () => getEntry('nope' as ArtifactType),
+                /Unknown artifact type: nope/,
+            );
+        });
+    });
+
+    suite('getAllTypes', () => {
+
+        /**
+         * @example
+         * getAllTypes() // → ['snippet', 'agent', 'command', 'template', 'variables']
+         */
+        test('returns every declared type in declaration order', () => {
+            assert.deepStrictEqual(getAllTypes(), ARTIFACTS.map(e => e.type));
+        });
+
+        test('includes non-create-form types', () => {
+            assert.ok(getAllTypes().includes('variables'));
+            assert.ok(getAllTypes().includes('agent'));
+            assert.ok(getAllTypes().includes('template'));
         });
     });
 });
