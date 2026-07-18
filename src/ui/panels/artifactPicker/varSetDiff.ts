@@ -1,5 +1,5 @@
 import type { ApplyChange } from '../../../types/varset.types.js';
-import { escHtml } from './preview.helpers.js';
+import { escHtml } from '../../../utils/html.js';
 
 /**
  * Renders the variable-set diff confirmation HTML — a table that lists every

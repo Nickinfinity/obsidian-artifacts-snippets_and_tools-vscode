@@ -6,19 +6,6 @@ import type { ParsedArtifactFile, ParsedBlock } from '../../../types/parsed-arti
 export const POPUP_VIEW_TYPE = 'obsidianArtifactPopupPreview';
 
 /**
- * Escapes `&`, `<`, `>`, `"`, and `'` for safe HTML text content.
- *
- * @param s - Plain text to escape.
- * @returns HTML-safe string.
- *
- * @example
- * escHtml('<div>') // → '&lt;div&gt;'
- */
-export function escHtml(s: string): string {
-    return s.replaceAll(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-}
-
-/**
  * Converts a `VK-xxx` variable name to a human-readable input label.
  *
  * Strips the `VK-` prefix, replaces `_` separators with spaces, lowercases
@@ -33,7 +20,7 @@ export function escHtml(s: string): string {
  */
 export function labelForVar(name: string): string {
     const hint   = name.startsWith('VK-') ? name.slice(3) : name;
-    const joined = hint.split('_').join(' ').toLowerCase();
+    const joined = hint.replaceAll('_', ' ').toLowerCase();
     return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 

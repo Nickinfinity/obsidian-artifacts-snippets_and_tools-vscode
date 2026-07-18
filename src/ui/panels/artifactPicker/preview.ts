@@ -6,10 +6,10 @@ import { PreviewModeController, type SectionKey } from '../../../services/previe
 import { getNonce } from '../../../utils/helpers.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
 import { out } from './shared.js';
+import { escHtml } from '../../../utils/html.js';
 import {
     POPUP_VIEW_TYPE,
     blockAsArtifact as _blockAsArtifact,  // re-exported for navigator use
-    escHtml,
     labelForVar,
     performInsert,
     popupShell,

@@ -14,7 +14,21 @@ const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const FRONTMATTER_STRIP_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const CODE_FENCE_RE        = /```(\w*)\r?\n([\s\S]*?)```/;
 const VKS_FENCE_RE         = /```vks\r?\n([\s\S]*?)```/;
-const VK_TOKEN_RE          = /<VK-([A-Za-z]\w*)>/g;
+
+/**
+ * Matches a `<VK-Hint>` variable token, where `Hint` starts with a letter.
+ *
+ * Exported so `render.service.ts` highlights exactly the tokens this parser
+ * detects — the two drifted apart as separate literals before Phase 1.
+ *
+ * **Carries the `/g` flag**, so it holds `lastIndex` state. Only use it with
+ * `matchAll` or `replace`/`replaceAll`, which reset `lastIndex` themselves;
+ * never with a bare `.test()` or `.exec()` loop.
+ *
+ * @example
+ * 'x = <VK-host>'.replaceAll(VK_TOKEN_RE, 'v')  // → 'x = v'
+ */
+export const VK_TOKEN_RE = /<VK-([A-Za-z]\w*)>/g;
 
 /**
  * Extracts and parses the YAML frontmatter block from raw vault file content.

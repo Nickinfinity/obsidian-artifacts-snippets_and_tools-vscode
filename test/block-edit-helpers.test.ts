@@ -4,12 +4,15 @@ import {
     extForLang,
     normalizeLangId,
     resolveLangId,
-    slug,
 } from '../src/ui/panels/artifactPicker/blockEditor.helpers.js';
 
 /**
- * Unit tests for the Edit Block language/slug helpers (VSX-89) and the
+ * Unit tests for the Edit Block language helpers (VSX-89) and the
  * LANG_ALIAS / LANG_EXT data maps (VSX-87).
+ *
+ * The block-editor `slug` helper was a third copy of `slugify` and was deleted
+ * in the services-dry refactor (Phase 1). Its four cases now live in
+ * `filename.service.test.ts` against the surviving implementation.
  *
  * The helper functions are throwing stubs until VSX-89 is implemented — those
  * suites are the red baseline. The map suite (VSX-87) is green: the maps are
@@ -131,26 +134,5 @@ suite('extForLang', () => {
 
     test('an unmapped non-filename-safe id falls back to txt', () => {
         assert.strictEqual(extForLang('weird-id!'), 'txt');
-    });
-});
-
-// ── slug (VSX-89) ───────────────────────────────────────────────────────────────
-
-suite('slug', () => {
-
-    test('lowercases and hyphenates spaced words', () => {
-        assert.strictEqual(slug('My Snippet Title'), 'my-snippet-title');
-    });
-
-    test('strips punctuation', () => {
-        assert.strictEqual(slug('Hello, World!'), 'hello-world');
-    });
-
-    test('trims and collapses surrounding whitespace', () => {
-        assert.strictEqual(slug('  Trim  Me  '), 'trim-me');
-    });
-
-    test('leaves an already-slugged string unchanged', () => {
-        assert.strictEqual(slug('already-slug'), 'already-slug');
     });
 });

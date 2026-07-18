@@ -2,25 +2,6 @@ import { getDefaultLanguage, getTypeSingular } from '../../../services/artifact-
 import type { ArtifactType } from '../../../types/parsed-artifact.types.js';
 import type { ArtifactFormModel } from '../../../types/artifact-form.types.js';
 
-// ── HTML escaping ─────────────────────────────────────────────────────────────
-
-const HTML_ESCAPE_MAP: Readonly<Record<string, string>> = {
-    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
-};
-
-/**
- * Escapes `&`, `<`, `>`, `"`, and `'` for safe HTML text content.
- *
- * @param s - Plain text to escape.
- * @returns HTML-safe string.
- *
- * @example
- * escHtml('<b>') // → '&lt;b&gt;'
- */
-export function escHtml(s: string): string {
-    return s.replaceAll(/[&<>"']/g, c => HTML_ESCAPE_MAP[c]!);
-}
-
 // ── Language options ──────────────────────────────────────────────────────────
 
 /**

@@ -1,6 +1,7 @@
 import { getLanguageMode, getDefaultLanguage, canMultiBlock, getTypeSingular } from '../../../services/artifact-type-config.service.js';
 import type { ArtifactFormModel } from '../../../types/artifact-form.types.js';
-import { escHtml, labelForAddBlock, labelForDeleteEntire } from './form.helpers.js';
+import { escHtml } from '../../../utils/html.js';
+import { labelForAddBlock, labelForDeleteEntire } from './form.helpers.js';
 import { buildSingleBlockContent, buildMultiBlockArea } from './form.blocks.js';
 
 // ── Public API ────────────────────────────────────────────────────────────────

@@ -202,6 +202,39 @@ suite('filename.service', () => {
             // No transliteration — non-[a-z0-9] runs become a single dash.
             assert.strictEqual(slugify('café'), 'caf');
         });
+
+        // ── Relocated from block-edit-helpers.test.ts ─────────────────────────
+        // These covered `blockEditor.helpers.slug`, a byte-identical third copy
+        // deleted in Phase 1 of the services-dry refactor. Kept verbatim so the
+        // surviving implementation still answers for every case the copy did.
+
+        test('lowercases and hyphenates spaced words', () => {
+            assert.strictEqual(slugify('My Snippet Title'), 'my-snippet-title');
+        });
+
+        test('strips punctuation', () => {
+            assert.strictEqual(slugify('Hello, World!'), 'hello-world');
+        });
+
+        test('trims and collapses surrounding whitespace', () => {
+            assert.strictEqual(slugify('  Trim  Me  '), 'trim-me');
+        });
+
+        test('leaves an already-slugged string unchanged', () => {
+            assert.strictEqual(slugify('already-slug'), 'already-slug');
+        });
+
+        // ── Relocated from varSetController's private slugify ─────────────────
+        // Its empty-input fallback ('untitled-variable-set') now lives at the
+        // call site, so the shared function's contract is: empty in, empty out.
+
+        test('punctuation-only title yields an empty slug (caller supplies the fallback)', () => {
+            assert.strictEqual(slugify('!!!'), '');
+        });
+
+        test('Local Development! → local-development', () => {
+            assert.strictEqual(slugify('Local Development!'), 'local-development');
+        });
     });
 
     // ── deriveFileName ───────────────────────────────────────────────────────

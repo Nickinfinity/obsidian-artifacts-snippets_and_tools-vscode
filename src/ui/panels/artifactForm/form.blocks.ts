@@ -1,4 +1,5 @@
-import { escHtml, FREE_LANGUAGE_OPTIONS } from './form.helpers.js';
+import { escHtml } from '../../../utils/html.js';
+import { FREE_LANGUAGE_OPTIONS } from './form.helpers.js';
 import type { ArtifactFormBlock, ArtifactFormModel } from '../../../types/artifact-form.types.js';
 import type { ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { LanguageMode } from '../../../types/artifact.types.js';

@@ -1,24 +1,6 @@
 import hljs from 'highlight.js';
-
-/** Regex matching VK-var tokens: `<VK-Hint>` where Hint starts with a letter. */
-const VK_TOKEN_RE = /<VK-([A-Za-z]\w*)>/g;
-
-/**
- * Escapes `&`, `<`, `>`, and `"` for safe HTML text content.
- *
- * @param text - Plain text to escape.
- * @returns HTML-safe string.
- *
- * @example
- * escHtml('<div>') // → '&lt;div&gt;'
- */
-function escHtml(text: string): string {
-    return text
-        .replaceAll('&', '&amp;')
-        .replaceAll('<', '&lt;')
-        .replaceAll('>', '&gt;')
-        .replaceAll('"', '&quot;');
-}
+import { VK_TOKEN_RE } from './parser.service.js';
+import { escHtml } from '../utils/html.js';
 
 /**
  * Highlights one line of source code and wraps `<VK-xxx>` tokens in

@@ -1,4 +1,4 @@
-import { escHtml } from './preview.helpers.js';
+import { escHtml } from '../../../utils/html.js';
 
 /**
  * Builds the contenteditable code-block HTML fragment.

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import { applyVarSet } from '../../../services/varset.service.js';
+import { slugify } from '../../../services/filename.service.js';
 import { ARTIFACTS } from '../../../types/constants.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { ApplyResult, VarSubSet } from '../../../types/varset.types.js';
@@ -164,7 +165,8 @@ export class VarSetController {
 
         const tags    = artifact.frontmatter.tags ?? [];
         const content = buildVarSetFileContent(title.trim(), description.trim(), tags, nonEmpty);
-        const slug    = slugify(title);
+        // Empty slug (a title of only punctuation) would write a bare `.md`.
+        const slug    = slugify(title) || 'untitled-variable-set';
         const fileUri = vscode.Uri.joinPath(variablesDirUri, `${slug}.md`);
 
         try {
@@ -222,21 +224,6 @@ function buildVarSetFileContent(
     for (const [name, value] of entries) { lines.push(`${name}=${value}`); }
     lines.push('```', '');
     return lines.join('\n');
-}
-
-/**
- * Slugifies a title into a safe file-name stem: lowercase letters/digits with
- * single hyphens between runs, no leading/trailing hyphen.
- *
- * @param title - Raw user-typed title.
- * @returns A file-system safe slug (always at least one character).
- *
- * @example
- * slugify('Local Development!') // → 'local-development'
- */
-function slugify(title: string): string {
-    const slug = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/(^-|-$)/g, '');
-    return slug.length > 0 ? slug : 'untitled-variable-set';
 }
 
 // ── ParsedVar export — helps consumers avoid an extra import ─────────────────

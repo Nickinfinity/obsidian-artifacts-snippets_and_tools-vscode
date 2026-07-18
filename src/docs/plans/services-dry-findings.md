@@ -170,4 +170,76 @@ Appended each phase (inner-loop step 6): **Discovered / Changed / Improved
 | `getConfiguration('obsidianArtifacts')` sites | 10 |
 | Confirmed-dead exports | 2 (+1 no-op expression) |
 
+---
+
+## Phase 1 — Shared pure helpers (escHtml · slug · VK_TOKEN_RE)
+
+### Discovered
+
+- **The plan undercounted `escHtml`: there were three TS copies, not two.** A
+  private third lived at `services/render.service.ts:15` and escaped only
+  **four** characters — it omitted `'`. Unifying on the 5-character version is
+  strictly safer (output is now also safe inside single-quoted attributes) and
+  changed no test, because the only path using it is the non-highlighted
+  fallback (hljs escapes its own output).
+- **`Math.random()` was generating CSP nonces** (`utils/helpers.ts`, flagged
+  S2245 while adding the missing JSDoc). A nonce is the only thing between an
+  injected `<script>` and execution; a predictable sequence defeats the policy.
+  Switched to `node:crypto`'s `randomInt` — same alphabet, same length, so no
+  caller or test shifted. **This was not in the plan** — it surfaced only
+  because the phase touched the file.
+- **`render.service.ts` has a misplaced JSDoc block** (lines ~73-98): the block
+  documenting `renderCodeHtml` sits above `renderCodeRowsHtml`'s own block, and
+  `renderCodeHtml` itself (line 123) has **no** JSDoc. Not fixed here — it is
+  not a P1 concern and the phase was already touching enough. **Assigned to
+  Phase 6**, which owns render-path cleanup.
+- The two slug copies were not quite identical: `varSetController`'s returned
+  `'untitled-variable-set'` for empty input while `filename.service.slugify`
+  returns `''`. The fallback moved to the **call site**, where it belongs — a
+  shared function should not carry one caller's default.
+
+### Changed
+
+- New `src/utils/html.ts` — the single `escHtml`. Deleted the copies in
+  `artifactPicker/preview.helpers.ts`, `artifactForm/form.helpers.ts`, and
+  `services/render.service.ts`; re-pointed all five importers.
+- Deleted `blockEditor.helpers.slug` and `varSetController`'s private
+  `slugify`; both callers now use `services/filename.service.slugify`.
+- `VK_TOKEN_RE` exported once from `parser.service.ts`; `render.service.ts`
+  imports it. Documented the `/g` `lastIndex` hazard on the export.
+- `getNonce` — added JSDoc and moved to a CSPRNG.
+- Fixed an S7781 warning (`split().join()` → `replaceAll`) in
+  `preview.helpers.labelForVar` while in the file.
+
+### Improved (metrics)
+
+| Metric | Before | After |
+|---|---|---|
+| Tests passing | 433 | **447** |
+| `escHtml` definitions in TS | 3 | 1 |
+| Slug function definitions | 3 | 1 |
+| `VK_TOKEN_RE` declarations | 2 | 1 |
+| `Math.random()` in security paths | 1 | 0 |
+
+Test delta: −4 (the `slug` suite, deleted with the code it covered), +6
+(relocated to `filename.service.test.ts`, covering the surviving function,
+including the two empty-input contracts), +12 (new `test/utils-html.test.ts`).
+**No coverage was lost** — the four deleted cases are reproduced verbatim
+against `slugify`.
+
+### Rule learned
+
+- **Grep for the *body*, not just the exported name.** The third `escHtml` was
+  private, differently named internally, and had a different character set —
+  a name-based inventory missed it. Recon greps should match the implementation
+  shape (`replaceAll('&'`, `&amp;`) as well as the identifier.
+- **Merging near-duplicate helpers surfaces behaviour differences that must be
+  decided, not averaged.** Two of the three merges here differed (4-char vs
+  5-char escaping; empty-slug fallback). Each needed an explicit call, and the
+  differing default belonged at the call site, not in the shared function.
+- **Touching a file invites its own audit.** The nonce weakness had nothing to
+  do with DRY; it was found because the phase opened the file for a JSDoc fix.
+  Worth keeping the reviewer step (inner loop #3) pointed at the *whole*
+  changed file, not just the changed lines.
+
 <!-- one entry appended per phase as the run proceeds -->
