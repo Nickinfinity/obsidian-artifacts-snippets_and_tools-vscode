@@ -17,6 +17,12 @@ compiled test keeps running and *inflates* the pass count (phantom green).
 automatically every phase. **Never open the PR** — Finalize prepares the body
 and stops; the PR is opened only on the user's explicit request.
 
+**Execution model:** Opus orchestrator, one Sonnet implementer subagent per
+phase (see the plan's Orchestration Workflow). The orchestrator owns every gate
+run, all git, and this ledger. Subagents never commit and never report a pass
+count the orchestrator has not re-verified itself. P5, P8 and P9 are not
+delegated wholesale — see the dispatch-notes table.
+
 > **RESUME HERE:** Phase 3 — One config reader. P0, P1 and P2 are landed and
 > pushed; gate green at **456**. Start by re-grepping P3's Evidence: the six
 > vault-path reads and the ten `'obsidianArtifacts'` literals.

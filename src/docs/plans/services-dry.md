@@ -26,6 +26,9 @@
   is opened **only when the user explicitly asks for it**.
 - If a push is rejected (non-fast-forward), stop and report — never
   `--force` onto a shared branch.
+- **Only the orchestrator runs git.** Implementer subagents leave their work
+  uncommitted in the working tree; the orchestrator gates it, then commits. A
+  subagent that commits its own phase can commit a red tree.
 
 ---
 
@@ -173,11 +176,38 @@ literals (S4624) · cognitive complexity ≤ 15 (S3776).
 
 ## Orchestration Workflow
 
-**Execution model: a single agent working inline.** This refactor is
-medium-sized and its phases share files (`constants.ts`, `varSetController.ts`,
-`preview.ts` each appear in 2-4 phases). Subagents would start cold, re-derive
-the same context, and collide on shared files. Inline execution is cheaper and
-tighter here. Do **not** dispatch per-phase subagents.
+**Execution model: an Opus orchestrator dispatching one Sonnet implementer
+subagent per phase.**
+
+| Role | Model | Owns |
+|---|---|---|
+| **Orchestrator** | Opus | Phase sequencing, evidence re-verification, dispatching, **every** gate run, review/remediate decisions, the ledger, the findings log, **all git operations**, and the stop-at-PR rule. |
+| **Implementer** | Sonnet | One phase's code + test edits, inside an explicit file allowlist. Nothing else. |
+| **Reviewer** (optional) | Sonnet | `sonarqube:sonarqube-reviewer` or `caveman:cavecrew-reviewer` on the phase diff, when the orchestrator wants a second pass before remediating. |
+
+### What the orchestrator never delegates
+
+These stay with Opus because a cold subagent has no way to get them right, and
+getting them wrong corrupts the record rather than just the code:
+
+1. **Running the gate and reading the pass count.** A subagent reporting "tests
+   pass" is a claim; the orchestrator runs `pnpm test` itself and reads the
+   number. The invariant is *count never drops* — only the orchestrator knows
+   the previous count.
+2. **All git.** Subagents do not `add`, `commit`, `push`, `checkout`, or
+   `stash`. The orchestrator commits after the gate is green, so a failed phase
+   leaves a dirty tree it can inspect rather than a bad commit it must revert.
+3. **The ledger and findings log.** One writer, or the resume pointer starts
+   lying.
+4. **Any decision the plan flags as a judgement call** — P5's golden-mismatch
+   branch (teach the serializer vs. change the golden), P4's objc canonical-id
+   choice, P7's "is this really dead", P6's cohesion-over-size deviation. The
+   subagent surfaces the mismatch and stops; Opus decides.
+5. **Phase 5 and Phase 8 implementation.** Do **not** hand these to Sonnet as a
+   single shot. P5 rewrites emitted `.md` bytes behind a golden lock; P8 must
+   prove a CSS split is loss-free by selector diff. Run them inline as Opus, or
+   split them into a mechanical half (capture goldens / move rules) that Sonnet
+   can do and a verification half that Opus keeps.
 
 ### The per-phase inner loop — run this verbatim, every phase
 
@@ -199,6 +229,101 @@ tighter here. Do **not** dispatch per-phase subagents.
 6. **Record.** Append a findings entry; tick the ledger (pass count + commit
    sha); **commit** (Conventional Commits); **push**; advance.
 
+**Who runs which step:** the orchestrator runs 1 (evidence re-verification), 2,
+5, and 6 itself. The implementer subagent runs 1 (the edits) and 4. Step 3 is
+either agent, but the orchestrator decides what to remediate.
+
+### Dispatch protocol
+
+1. **Before dispatching:** re-grep the phase's Evidence yourself. If a cited
+   `file:line` no longer matches, fix the spec before sending it — a subagent
+   handed stale evidence will either invent a target or silently do nothing.
+   Confirm the working tree is clean and the last gate was green.
+2. **Dispatch one phase at a time**, `run_in_background: false`, with the
+   standard preamble below prepended to the phase's spec. Serial by default —
+   see the ledger's shared-file table. Only P3 and P4 may run concurrently, and
+   only once P1 and P2 are committed.
+3. **On return:** ignore the subagent's claims about test results. Run
+   `rm -rf dist && pnpm test` yourself (the `rm -rf` is mandatory whenever the
+   phase deleted or renamed a file). Read the count. Compare to the ledger.
+4. **If red or the count dropped:** do not commit. Either fix inline or
+   re-dispatch with the specific failure quoted. A dropped count is a defect
+   unless it is the sanctioned deleted-code-test exception, which requires the
+   coverage to have been relocated first.
+5. **If green:** review → remediate → re-gate → findings → ledger → commit →
+   push → next phase.
+
+### Standard preamble — prepend verbatim to EVERY subagent prompt
+
+```text
+You are implementing ONE phase of a refactor in a VS Code extension repo.
+Read src/docs/plans/services-dry.md for full context before editing.
+
+SKILLS — invoke these first, every time:
+  - Skill ponytail  (reuse before writing; shortest working diff; delete over
+    add; NO abstraction without a second concrete caller today)
+  - Skill caveman   (terse output)
+  - Skill mastering-typescript  (before ANY TypeScript edit)
+Expect a SonarQube pass on your changed files; clear Blocker/Critical findings.
+If Sonar is unavailable, `pnpm lint` enforces the same SonarSource S-rules.
+
+HARD CONSTRAINTS:
+  - Touch ONLY the files listed in "Touches". Not one file more. If the work
+    seems to require another file, STOP and report why instead of editing it.
+  - Run NO git commands. No add, commit, push, checkout, stash, branch. The
+    orchestrator owns git. Leave your work uncommitted in the working tree.
+  - Do NOT edit ARTIFACT_FILE_FORMAT.md or package.json's contributes block.
+  - Do NOT edit any file under test/snapshots/ unless your phase spec says to.
+  - Do NOT weaken a test to make it pass. If a pre-existing test fails, that is
+    a signal your change is wrong — the existing suite is the authority on
+    current behaviour. Report it; do not "fix" the test.
+
+METHOD:
+  1. Re-verify the Evidence by grep before you cut. The tree beats the plan; if
+     the plan's file:line is stale or wrong, report that and stop.
+  2. TDD for any pure, framework-free unit: write/confirm the covering test
+     FIRST, see it fail, then refactor until green.
+  3. Every function or interface you add or change carries a full JSDoc block:
+     description, @param, @returns, @example. Comments explain WHY.
+  4. Imports use explicit .js extensions even in .ts files (Node16 resolution).
+  5. ESLint gotchas: RegExp.exec(str) not str.match(re) (S6594);
+     str.startsWith(x) not /^x/.test(str) (S6557); no nested template literals
+     (S4624); cognitive complexity <= 15 per function (S3776).
+
+VERIFY BEFORE YOU REPORT:
+  Run: rm -rf dist && pnpm test
+  It must exit 0. Report the exact pass count you observed.
+  (The orchestrator will re-run this independently — do not round, guess, or
+  describe it as passing without having run it.)
+
+REPORT BACK, briefly:
+  - Files changed, and what each change was.
+  - The pass count you observed.
+  - Anything the plan got wrong (stale evidence, a smell that did not exist, a
+    behaviour difference you had to decide about).
+  - Anything you deliberately did NOT do, and why.
+```
+
+### Per-phase dispatch specs
+
+`Touches`, `Evidence`, `Do`, `TDD`, and `Done-when` for each phase are in the
+**Phases** section below — that is the spec body. Append it to the preamble
+verbatim; do not paraphrase it, and do not drop the Evidence lines (they are
+what lets a cold subagent verify rather than guess).
+
+**Phase-specific dispatch notes:**
+
+| Phase | Dispatch as | Note |
+|---|---|---|
+| P0-P2 | — | **Already landed** (`4709ec5`, `02270da`, `2516204`). Do not re-run. |
+| P3 | Sonnet, single shot | Mechanical: one new service, replace ~10 call sites. |
+| P4 | Sonnet, single shot | Include the explicit instruction **not** to merge the four language tables. Surface the objc canonical-id choice to the orchestrator rather than picking one. |
+| P5 | **Opus / inline** | Golden lock + byte-identical proof. If split: Sonnet may capture the goldens (step 1) as its own dispatch; Opus does the serializer swap and owns the mismatch decision. |
+| P6 | Sonnet, single shot | Largest mechanical diff. Emphasise: `acquireVsCodeApi()` may be called only once per webview; the shared snippet must not call it. |
+| P7 | Sonnet, but verify-only first | Dispatch as "verify these two symbols are dead and report evidence" **before** dispatching the deletion. "Dead" is a claim. |
+| P8 | **Opus / inline** | The selector-diff proof is the whole point of the phase; do not delegate the proof. Sonnet may perform the file split once Opus has captured the before-diff. |
+| P9 | **Opus only** | Finalize. Never delegate the stop-at-PR rule. |
+
 ---
 
 ## Reuse Before Writing (existing assets — do not re-implement)
@@ -207,17 +332,18 @@ tighter here. Do **not** dispatch per-phase subagents.
 |---|---|---|
 | `slugify`, `deriveFileName` | `src/services/filename.service.ts:118,139` | **The** slug implementation. Delete the two copies; import this. |
 | `validateArtifactFilename`, `validateFolderName` | `src/services/filename.service.ts:71,96` | All user-typed name validation. |
-| `findEntry` (make it `getEntry`, export it) | `src/services/artifact-type-config.service.ts:20` | **The** `ARTIFACTS` lookup. |
+| `getEntry` / `getAllTypes` | `src/services/artifact-type-config.service.ts` | **The** `ARTIFACTS` lookup (P2). Never write `ARTIFACTS.find(a => a.type === …)` again. |
 | `getFormConfig` / `getLanguageMode` / `getDefaultLanguage` / `getTypeSingular` / `canMultiBlock` / `getCreateFormTypes` | `src/services/artifact-type-config.service.ts:43-137` | Per-type behaviour. Never re-derive from `ARTIFACTS`. |
 | `serializeArtifact` | `src/services/artifact-serializer.service.ts:40` | **The** `.md` emitter. |
 | `parseFromContent`, `parseArtifactFile`, `parseBlocks`, `extractVars`, `resolveVars` | `src/services/parser.service.ts` | **The** `.md` reader. |
 | `patchFrontmatterField`, `patchVarDefaults` | `src/services/artifact-patcher.service.ts` | Surgical in-place `.md` edits. |
-| `escHtml` | `src/ui/panels/artifactPicker/preview.helpers.ts:17` | Canonical body → moves to `src/utils/html.ts` in P1. |
+| `escHtml` | `src/utils/html.ts` | **The** HTML escaper (P1). Escapes all five of `&<>"'`. |
 | `labelForVar` | `src/ui/panels/artifactPicker/preview.helpers.ts:34` | Canonical `VK-` label formatter. |
 | `popupShell` | `src/ui/panels/artifactPicker/preview.helpers.ts:52` | Script-free webview HTML shell. |
 | `renderCodeHtml` / `renderCodeRowsHtml` | `src/services/render.service.ts` | Code rendering — `renderCodeRowsHtml` when the caller supplies its own wrapper. |
 | `buildCodeBlockHtml` + `CODE_BLOCK_CLIENT_JS` | `src/ui/panels/artifactPicker/codeBlock.ts` | The editable-code-area plug-in pair. |
-| `getNonce` | `src/utils/helpers.ts:1` | CSP nonces. (Needs JSDoc — see J1.) |
+| `getNonce` | `src/utils/helpers.ts` | CSP nonces — CSPRNG-backed since P1. Never generate one with `Math.random()`. |
+| `VK_TOKEN_RE` | `src/services/parser.service.ts` | **The** `<VK-xxx>` token regex (P1). Carries `/g` — use only with `matchAll`/`replaceAll`. |
 | `isWithinRoot` | `src/services/artifact-writer.service.ts:127` | Path-escape guard pattern to imitate for any new path join. |
 | **Pattern to imitate:** `form.html.ts` + `form.clientJs.ts` + `form.blocks.ts` split | `src/ui/panels/artifactForm/` | The model for the P6 `preview.ts` split — renderer, client JS, and sub-renderers in separate files. |
 | **Pattern to imitate:** callback-bag controller composition | `preview.ts:63-89` | How a controller owns sub-controllers without reaching into their internals. |
@@ -233,7 +359,7 @@ the repo's own test script and covers the **full** suite:
 pnpm test
 ```
 
-Equivalent to `tsc -p ./` + `eslint src` + all 433 tests in a real Extension
+Equivalent to `tsc -p ./` + `eslint src` + the full suite in a real Extension
 Development Host.
 
 **Clean-rebuild rule:** `tsc` does **not** remove orphaned output. After any
@@ -245,13 +371,21 @@ rm -rf dist && pnpm test
 ```
 
 Green = zero failures **and** pass count ≥ the previous gate's.
-**Baseline: 433 passing** (verified during recon, with the T1 fix applied).
+
+**Baseline: 433 passing** (recon, with the T1 fix applied).
+**Current: 456 passing** after P0-P2. The ledger's gate log is authoritative —
+read it, do not assume this line is current.
 
 ---
 
 ## Phases
 
-### Phase 0 — Baseline (orchestrator, no source edits)
+> **P0, P1 and P2 are LANDED and pushed** — `4709ec5`, `02270da`, `2516204`.
+> They are kept below as the record of what was done, not as work to do. The
+> next phase to dispatch is **P3**. Confirm against the ledger's gate log and
+> `git log --oneline main..HEAD` before starting.
+
+### Phase 0 — Baseline (orchestrator, no source edits) ✅ LANDED `4709ec5`
 
 - **Do:**
   1. `git checkout -b refactoring/services-dry` from `main`.
@@ -265,7 +399,7 @@ Green = zero failures **and** pass count ≥ the previous gate's.
 - **Done-when:** branch exists and is pushed; gate green at 433; ledger and
   findings files committed with the Phase 0 discovery inventory.
 
-### Phase 1 — Shared pure helpers (escHtml · slug · VK regex)
+### Phase 1 — Shared pure helpers (escHtml · slug · VK regex) ✅ LANDED `02270da`
 
 - **Touches:** `src/utils/html.ts` (new), `src/utils/helpers.ts`,
   `src/ui/panels/artifactPicker/preview.helpers.ts`,
@@ -305,7 +439,7 @@ Green = zero failures **and** pass count ≥ the previous gate's.
   `VK_TOKEN_RE` in `src/`; `grep -rn "function escHtml\|function slug\b" src`
   returns one hit each; gate green, count ≥ 433.
 
-### Phase 2 — One artifact-type accessor (kill the `ARTIFACTS.find` cascade)
+### Phase 2 — One artifact-type accessor (kill the `ARTIFACTS.find` cascade) ✅ LANDED `2516204`
 
 - **Touches:** `src/services/artifact-type-config.service.ts`,
   `src/ui/panels/artifactForm/panel.ts`, `src/commands/create.command.ts`,
