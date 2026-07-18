@@ -5,6 +5,7 @@ import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js
 import { out } from './shared.js';
 import { ArtifactItem, buildItem, PREVIEW_DEBOUNCE_MS } from './navigator.helpers.js';
 import { PreviewPanelController, blockAsArtifact } from './preview.js';
+import { getVaultRootUri } from '../../../services/config.service.js';
 
 /**
  * Opens a QuickPick navigator for the given vault artifact directory.
@@ -29,17 +30,14 @@ export async function openArtifactPicker(
     extensionUri: vscode.Uri,
     storageUri: vscode.Uri,
 ): Promise<void> {
-    const vaultPath = vscode.workspace
-        .getConfiguration('obsidianArtifacts')
-        .get<string>('vaultPath', '')
-        .trim();
+    const vaultRoot = getVaultRootUri();
 
-    if (!vaultPath) {
+    if (!vaultRoot) {
         vscode.window.showErrorMessage('Obsidian Artifacts: No vault configured. Open Settings to select your vault.');
         return;
     }
 
-    const rootUri = vscode.Uri.joinPath(vscode.Uri.file(vaultPath), artifactDir);
+    const rootUri = vscode.Uri.joinPath(vaultRoot, artifactDir);
 
     try {
         const stat = await vscode.workspace.fs.stat(rootUri);

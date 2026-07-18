@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { getCreateFormTypes, getEntry } from '../services/artifact-type-config.service.js';
 import { validateObsidianVault } from '../services/vault.service.js';
+import { getVaultPath } from '../services/config.service.js';
 import { openArtifactFormPanel } from '../ui/panels/artifactForm/panel.js';
 import { mapLanguageId } from '../services/language-map.service.js';
 import type { ArtifactType } from '../types/parsed-artifact.types.js';
@@ -109,10 +110,7 @@ export function registerCreateCommands(context: vscode.ExtensionContext): void {
     context.subscriptions.push(
         // ── obsidian-artifacts.create ─────────────────────────────────────────
         vscode.commands.registerCommand('obsidian-artifacts.create', async () => {
-            const vaultPath = vscode.workspace
-                .getConfiguration('obsidianArtifacts')
-                .get<string>('vaultPath', '')
-                .trim();
+            const vaultPath = getVaultPath();
 
             if (!vaultPath || !validateObsidianVault(vaultPath)) { return; }
 

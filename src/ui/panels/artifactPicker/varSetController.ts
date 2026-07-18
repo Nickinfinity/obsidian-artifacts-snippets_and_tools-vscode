@@ -1,8 +1,8 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
 import { applyVarSet } from '../../../services/varset.service.js';
 import { slugify } from '../../../services/filename.service.js';
 import { getEntry } from '../../../services/artifact-type-config.service.js';
+import { getVaultRootUri } from '../../../services/config.service.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { ApplyResult, VarSubSet } from '../../../types/varset.types.js';
 import { getVarSetScanner, pickVarSet } from '../varsetPicker.panel.js';
@@ -190,12 +190,9 @@ export class VarSetController {
  * const dir = getVariablesDirUri();
  */
 function getVariablesDirUri(): vscode.Uri | null {
-    const vaultPath = vscode.workspace
-        .getConfiguration('obsidianArtifacts')
-        .get<string>('vaultPath', '')
-        .trim();
-    if (vaultPath.length === 0) { return null; }
-    return vscode.Uri.file(path.join(vaultPath, getEntry('variables').dir));
+    const vaultRoot = getVaultRootUri();
+    if (!vaultRoot) { return null; }
+    return vscode.Uri.joinPath(vaultRoot, getEntry('variables').dir);
 }
 
 /**

@@ -10,6 +10,7 @@ import { validateArtifactFilename, deriveFileName } from '../../../services/file
 import { extractVars } from '../../../services/parser.service.js';
 import { getNonce } from '../../../utils/helpers.js';
 import { getEntry, getTypeSingular } from '../../../services/artifact-type-config.service.js';
+import { getVaultRootUri } from '../../../services/config.service.js';
 import { renderCodeRowsHtml } from '../../../services/render.service.js';
 import { buildCodeBlockHtml } from '../artifactPicker/codeBlock.js';
 import type { ArtifactType } from '../../../types/parsed-artifact.types.js';
@@ -237,11 +238,8 @@ class ArtifactFormController {
     // ── Atomic save flow (§4.5) ───────────────────────────────────────────────
 
     private async handleSave(model: ArtifactFormModel): Promise<void> {
-        const vaultPath = vscode.workspace
-            .getConfiguration('obsidianArtifacts')
-            .get<string>('vaultPath', '')
-            .trim();
-        if (!vaultPath) {
+        const vaultRoot = getVaultRootUri();
+        if (!vaultRoot) {
             this.post({ command: 'saveResult', ok: false, error: 'Vault not configured.' });
             return;
         }
@@ -257,8 +255,7 @@ class ArtifactFormController {
             return;
         }
 
-        const vaultRoot = vscode.Uri.file(vaultPath);
-        const baseDir   = vscode.Uri.joinPath(vaultRoot, baseDirName);
+        const baseDir = vscode.Uri.joinPath(vaultRoot, baseDirName);
 
         // Step 1: destination folder
         const chosenDir = await pickDestFolder(baseDir);

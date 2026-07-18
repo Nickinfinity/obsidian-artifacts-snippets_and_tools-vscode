@@ -3,6 +3,7 @@ import * as path from 'path';
 import { getNonce } from '../../utils/helpers.js';
 import { validateObsidianVault, detectVaultDirs, createVaultDirectory, deleteVaultDirectory, isDirectoryEmpty } from '../../services/vault.service.js';
 import { refreshVaultContext } from '../../services/context.service.js';
+import { CONFIG_SECTION, getVaultPath } from '../../services/config.service.js';
 
 /**
  * Opens the configuration panel webview where users can:
@@ -41,10 +42,7 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 	// webview. Called on initial open AND every time the panel becomes visible
 	// again so any external setting changes (e.g. Settings Sync) are reflected.
 	function postCurrentConfig(): void {
-		const savedPath = vscode.workspace
-			.getConfiguration('obsidianArtifacts')
-			.get<string>('vaultPath', '')
-			.trim();
+		const savedPath = getVaultPath();
 
 		if (savedPath) {
 			const detectedDirs = detectVaultDirs(savedPath);
@@ -81,7 +79,7 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 
 				// Persist vault path to VS Code settings (global scope = synced across devices)
 				await vscode.workspace
-					.getConfiguration('obsidianArtifacts')
+					.getConfiguration(CONFIG_SECTION)
 					.update('vaultPath', selectedFolderPath, vscode.ConfigurationTarget.Global);
 
 				vscode.window.showInformationMessage(`Obsidian vault path saved: ${selectedFolderPath}`);
@@ -122,7 +120,7 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 
 			// Persist the feature flag to VS Code settings so it syncs across devices
 			await vscode.workspace
-				.getConfiguration('obsidianArtifacts')
+				.getConfiguration(CONFIG_SECTION)
 				.update(
 					`features.${dirName.toLowerCase()}`,
 					isChecked,
