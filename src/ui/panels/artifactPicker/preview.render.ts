@@ -1,5 +1,5 @@
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
-import { escHtml } from '../../../utils/html.js';
+import { escHtml, styleLinkTags } from '../../../utils/html.js';
 import { buildCodeBlockHtml } from './codeBlock.js';
 import { PREVIEW_CLIENT_JS } from './preview.clientJs.js';
 import { labelForVar, popupShell } from './preview.helpers.js';
@@ -51,7 +51,7 @@ export function renderPreviewHtml(
     a: ParsedArtifactFile,
     codeRowsHtml: string,
     nonce: string,
-    cssUri: string,
+    cssUri: string | string[],
     cspSource: string,
     varSources: Record<string, string> = {},
 ): string {
@@ -84,7 +84,7 @@ export function renderPreviewHtml(
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy"
       content="default-src 'none'; style-src ${cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
-<link rel="stylesheet" href="${cssUri}">
+${styleLinkTags(cssUri)}
 </head>
 <body class="popup-body">
   <h1>${title}</h1>
@@ -136,7 +136,7 @@ export function renderPreviewHtml(
 export function renderMultiBlockPreviewHtml(
     a: ParsedArtifactFile,
     highlightedBlocks: { heading: string; codeHtml: string; vars: ParsedVar[]; description: string }[],
-    cssUri: string,
+    cssUri: string | string[],
     cspSource: string,
 ): string {
     const e = escHtml;
@@ -178,7 +178,7 @@ export function renderMultiBlockPreviewHtml(
  * @example
  * renderPopupEmptyHtml(cssUri, cspSource)
  */
-export function renderPopupEmptyHtml(cssUri: string, cspSource: string): string {
+export function renderPopupEmptyHtml(cssUri: string | string[], cspSource: string): string {
     return popupShell(
         '<p style="text-align:center;margin-top:40px">Select a file to preview</p>',
         cssUri,

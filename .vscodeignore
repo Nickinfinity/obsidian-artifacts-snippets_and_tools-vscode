@@ -1,7 +1,11 @@
 .vscode/**
 .vscode-test/**
 src/**
-!src/ui/styles.css
+# Webview stylesheets must ship — localResourceRoots is extensionUri/src/ui, so
+# they load from source, not from dist/. Keep this a glob: the single styles.css
+# was split into base/settings/picker/hljs/code-block/varset/form, and a named
+# exception would have silently shipped a CSS-less extension.
+!src/ui/*.css
 test/**
 dist/test/**
 .gitignore

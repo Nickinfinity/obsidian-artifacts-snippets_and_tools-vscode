@@ -1,0 +1,94 @@
+.popup-body pre {
+  background: var(--vscode-textCodeBlock-background, var(--vscode-sideBar-background));
+  border: 1px solid var(--vscode-panel-border);
+  border-radius: 4px;
+  padding: 10px 12px;
+  font-family: var(--vscode-editor-font-family, monospace);
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre;
+  overflow-x: auto;
+  max-height: 220px;
+  overflow-y: auto;
+  margin-bottom: 4px;
+}
+
+.popup-body pre code,
+.popup-body pre code.hljs {
+  font-family: inherit;
+  font-size: inherit;
+  background: transparent;
+  padding: 0;
+  color: var(--vscode-editor-foreground);
+  white-space: pre;
+  display: block;
+}
+
+/* Token colors mapped to VS Code semantic theme variables (with sensible fallbacks) */
+.popup-body .hljs-keyword,
+.popup-body .hljs-selector-tag,
+.popup-body .hljs-literal,
+.popup-body .hljs-built_in {
+  color: var(--vscode-symbolIcon-keywordForeground, #569cd6);
+}
+
+.popup-body .hljs-string,
+.popup-body .hljs-attr,
+.popup-body .hljs-template-tag,
+.popup-body .hljs-template-variable {
+  color: var(--vscode-symbolIcon-stringForeground, #ce9178);
+}
+
+.popup-body .hljs-comment,
+.popup-body .hljs-quote {
+  color: var(--vscode-debugConsole-sourceForeground, #6a9955);
+  font-style: italic;
+}
+
+.popup-body .hljs-number,
+.popup-body .hljs-symbol,
+.popup-body .hljs-bullet {
+  color: var(--vscode-symbolIcon-numberForeground, #b5cea8);
+}
+
+.popup-body .hljs-function .hljs-title,
+.popup-body .hljs-title.function_,
+.popup-body .hljs-title {
+  color: var(--vscode-symbolIcon-functionForeground, #dcdcaa);
+}
+
+.popup-body .hljs-class .hljs-title,
+.popup-body .hljs-title.class_,
+.popup-body .hljs-type {
+  color: var(--vscode-symbolIcon-classForeground, #4ec9b0);
+}
+
+.popup-body .hljs-variable,
+.popup-body .hljs-name,
+.popup-body .hljs-params,
+.popup-body .hljs-attribute {
+  color: var(--vscode-symbolIcon-variableForeground, #9cdcfe);
+}
+
+.popup-body .hljs-tag,
+.popup-body .hljs-meta,
+.popup-body .hljs-meta-keyword {
+  color: var(--vscode-symbolIcon-keywordForeground, #c586c0);
+}
+
+.popup-body .hljs-regexp {
+  color: var(--vscode-symbolIcon-stringForeground, #d16969);
+}
+
+.popup-body .hljs-deletion {
+  color: var(--vscode-gitDecoration-deletedResourceForeground, #f44747);
+}
+
+.popup-body .hljs-addition {
+  color: var(--vscode-gitDecoration-addedResourceForeground, #6a9955);
+}
+
+.popup-body .hljs-operator,
+.popup-body .hljs-punctuation {
+  color: var(--vscode-editor-foreground);
+}

@@ -1,6 +1,6 @@
 import { getLanguageMode, getDefaultLanguage, canMultiBlock, getTypeSingular } from '../../../services/artifact-type-config.service.js';
 import type { ArtifactFormModel } from '../../../types/artifact-form.types.js';
-import { escHtml } from '../../../utils/html.js';
+import { escHtml, styleLinkTags } from '../../../utils/html.js';
 import { labelForAddBlock, labelForDeleteEntire } from './form.helpers.js';
 import { buildSingleBlockContent, buildMultiBlockArea } from './form.blocks.js';
 
@@ -17,8 +17,8 @@ export interface BuildFormHtmlArgs {
     model: ArtifactFormModel;
     /** Webview CSP source token (e.g. `panel.webview.cspSource`). */
     cspSource: string;
-    /** Webview URI for `styles.css`. */
-    cssUri: string;
+    /** Webview URI(s) for this panel's stylesheets, in cascade order. */
+    cssUri: string | string[];
     /** CSP nonce threaded into `<script>` tags (Phase 6b). */
     nonce: string;
     /** Produces editable code-block HTML for a given code + language pair. */
@@ -114,9 +114,9 @@ function buildScriptTag(nonce: string, clientJs: string): string {
  * @example
  * buildHead('abc123', panel.webview.cspSource, cssUri.toString())
  */
-function buildHead(nonce: string, cspSource: string, cssUri: string): string {
+function buildHead(nonce: string, cspSource: string, cssUri: string | string[]): string {
     const csp = `default-src 'none'; script-src 'nonce-${escHtml(nonce)}'; style-src ${escHtml(cspSource)};`;
-    const link = cssUri ? `<link rel="stylesheet" href="${escHtml(cssUri)}">` : '';
+    const link = styleLinkTags(cssUri);
     return `<head>
 <meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="${csp}">

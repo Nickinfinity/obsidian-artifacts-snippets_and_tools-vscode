@@ -42,7 +42,7 @@ export interface PreviewCallbacks {
  */
 export class PreviewPanelController {
     private panel: vscode.WebviewPanel | undefined;
-    private cssUri    = '';
+    private cssUri: string[] = [];
     private cspSource = '';
     private currentArtifact: ParsedArtifactFile | undefined;
     private modeController: PreviewModeController | undefined;
@@ -175,9 +175,12 @@ export class PreviewPanelController {
                 this.currentArtifact = undefined;
                 this.cb.onDispose();
             });
-            this.cssUri    = this.panel.webview.asWebviewUri(
-                vscode.Uri.joinPath(this.cb.extensionUri, 'src', 'ui', 'styles.css'),
-            ).toString();
+            // Order matters — base.css carries the global reset every panel needs.
+            this.cssUri = ['base.css', 'picker.css', 'code-block.css', 'hljs.css', 'varset.css'].map(
+                f => this.panel!.webview.asWebviewUri(
+                    vscode.Uri.joinPath(this.cb.extensionUri, 'src', 'ui', f),
+                ).toString(),
+            );
             this.cspSource = this.panel.webview.cspSource;
             out.appendLine(`[popup] created`);
             return true;

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { resolveVars } from '../../../services/parser.service.js';
 import type { ParsedArtifactFile, ParsedBlock } from '../../../types/parsed-artifact.types.js';
+import { styleLinkTags } from '../../../utils/html.js';
 
 /** WebviewPanel viewType used for both the read-only preview and the interactive popup. */
 export const POPUP_VIEW_TYPE = 'obsidianArtifactPopupPreview';
@@ -36,8 +37,8 @@ export function labelForVar(name: string): string {
  * @example
  * return popupShell('<p>Hello</p>', cssUri, cspSource);
  */
-export function popupShell(body: string, cssUri: string, cspSource = "'unsafe-inline'"): string {
-    const linkTag = cssUri ? `<link rel="stylesheet" href="${cssUri}">` : '';
+export function popupShell(body: string, cssUri: string | string[], cspSource = "'unsafe-inline'"): string {
+    const linkTag = styleLinkTags(cssUri);
     return /* html */`<!DOCTYPE html>
 <html lang="en">
 <head>

@@ -155,13 +155,17 @@ class ArtifactFormController {
     private render(): void {
         if (!this.panel) { return; }
         const nonce  = getNonce();
-        const cssUri = this.panel.webview.asWebviewUri(
-            vscode.Uri.joinPath(this.context.extensionUri, 'src', 'ui', 'styles.css'),
+        // Order matters — base.css carries the global reset. No hljs.css: those
+        // rules are all .popup-body-scoped and never applied to this panel.
+        const cssUri = ['base.css', 'form.css', 'code-block.css'].map(
+            f => this.panel!.webview.asWebviewUri(
+                vscode.Uri.joinPath(this.context.extensionUri, 'src', 'ui', f),
+            ).toString(),
         );
         this.panel.webview.html = buildFormHtml({
             model:        this.model,
             cspSource:    this.panel.webview.cspSource,
-            cssUri:       cssUri.toString(),
+            cssUri,
             nonce,
             codeBlockHtml: (code, lang) => buildCodeBlockHtml(renderCodeRowsHtml(code, lang), lang),
             clientJs:     FORM_CLIENT_JS,

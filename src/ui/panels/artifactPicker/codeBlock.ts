@@ -5,7 +5,7 @@ import { WEBVIEW_ESC_LBL_JS } from './webviewSnippets.js';
  * Builds the contenteditable code-block HTML fragment.
  *
  * The wrapper carries the `editable` modifier so it gets the editor border /
- * caret colour from `styles.css`.  Line numbers are server-rendered (passed in
+ * caret colour from `code-block.css`.  Line numbers are server-rendered (passed in
  * via `rowsHtml`) and refreshed in-place on every keystroke by the client-side
  * script.
  *

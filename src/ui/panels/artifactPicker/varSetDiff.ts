@@ -8,7 +8,7 @@ import { escHtml } from '../../../utils/html.js';
  * this fragment so the user can confirm before committing.
  *
  * Posts `confirmApply` or `cancelApply` on button click. Markup uses class
- * names defined in `src/ui/styles.css` under `── Variable-set diff preview ──`.
+ * names defined in `src/ui/varset.css`.
  *
  * @param changes    - Per-var change rows from `ApplyResult.changes`.
  * @param subSetName - Human-readable heading of the picked sub-set (used in title).
