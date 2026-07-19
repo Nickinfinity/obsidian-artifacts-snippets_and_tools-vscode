@@ -1,4 +1,5 @@
 import { escHtml } from '../../../utils/html.js';
+import { WEBVIEW_ESC_LBL_JS } from './webviewSnippets.js';
 
 /**
  * Builds the contenteditable code-block HTML fragment.
@@ -28,7 +29,8 @@ export function buildCodeBlockHtml(rowsHtml: string, lang: string): string {
  * holds `vscode = acquireVsCodeApi()`).  This payload:
  *
  * - Looks up `#codeWrapper` itself.
- * - Defines local `extractCode`, `escHtml`, `vkWrap`, `renderRows`.
+ * - Concatenates `WEBVIEW_ESC_LBL_JS` for the shared `esc`/`lbl` helpers,
+ *   then defines local `extractCode`, `vkWrap`, `renderRows`.
  * - Implements caret-preserving re-render on `input` (debounced 150 ms).
  * - Intercepts `Enter` to insert a literal `\n` (avoids `<div>` wrapping).
  * - Intercepts paste to strip rich HTML.
@@ -36,13 +38,14 @@ export function buildCodeBlockHtml(rowsHtml: string, lang: string): string {
  *   script can read the latest plain-text code and re-render after a server
  *   `fileUpdated` round-trip.
  *
- * The string is embedded literally — `\\n` here becomes `\n` in the rendered
- * webview JS.
+ * Tagged with `String.raw` so escape sequences below (`\n`, `\w`) are written
+ * once instead of doubled — raw mode only changes how *this* TS template
+ * reads its own source; the emitted webview JS text is unaffected.
  *
  * @example
  * const html = `<script nonce="${n}">(function(){ const vscode = acquireVsCodeApi(); ${CODE_BLOCK_CLIENT_JS} ... })();</script>`;
  */
-export const CODE_BLOCK_CLIENT_JS = /* javascript */`
+export const CODE_BLOCK_CLIENT_JS = /* javascript */ String.raw`${WEBVIEW_ESC_LBL_JS}
   // ── Code-block client (Part 2) ──────────────────────────────────────────
   const codeWrapper = document.getElementById('codeWrapper');
 
@@ -54,22 +57,21 @@ export const CODE_BLOCK_CLIENT_JS = /* javascript */`
       const c = r.querySelector('.code-content');
       parts.push(c ? c.textContent : '');
     });
-    return parts.join('\\n');
+    return parts.join('\n');
   }
 
-  function escHtml(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
   function vkWrap(html) {
-    return html.replace(/&lt;VK-([A-Za-z]\\w*)&gt;/g, '<span class="vk-var">&lt;VK-$1&gt;</span>');
+    return html.replace(/&lt;VK-([A-Za-z]\w*)&gt;/g, '<span class="vk-var">&lt;VK-$1&gt;</span>');
   }
   function renderRows(code) {
-    const lines = code.split('\\n');
+    const lines = code.split('\n');
     return lines.map(function (line, i) {
       return '<div class="code-line-row"><span class="line-number" contenteditable="false">' +
-        (i + 1) + '</span><span class="code-content">' + vkWrap(escHtml(line)) + '</span></div>';
+        (i + 1) + '</span><span class="code-content">' + vkWrap(esc(line)) + '</span></div>';
     }).join('');
   }
 
-  // ── Caret offset (counted across all .code-content text + joining \\n) ──
+  // ── Caret offset (counted across all .code-content text + joining \n) ──
   function getCaretOffset() {
     const sel = window.getSelection();
     if (!sel || sel.rangeCount === 0) { return 0; }
@@ -138,7 +140,7 @@ export const CODE_BLOCK_CLIENT_JS = /* javascript */`
   codeWrapper.addEventListener('keydown', function (ev) {
     if (ev.key === 'Enter') {
       ev.preventDefault();
-      document.execCommand('insertText', false, '\\n');
+      document.execCommand('insertText', false, '\n');
     }
   });
   codeWrapper.addEventListener('paste', function (ev) {

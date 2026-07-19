@@ -8,10 +8,13 @@ import { CODE_BLOCK_CLIENT_JS } from '../artifactPicker/codeBlock.js';
  * Intended to be embedded inside one outer IIFE that provides
  * `const vscode = acquireVsCodeApi()` — call that exactly once per webview.
  * Includes `CODE_BLOCK_CLIENT_JS` (which sets up `window.__codeBlock` for
- * the first / only code area) then layers in all form-specific interactivity.
+ * the first / only code area, and also carries the shared `esc`/`lbl`
+ * helpers from `webviewSnippets.ts` — see `renderVarsSection` below) then
+ * layers in all form-specific interactivity.
  *
  * Responsibilities:
- * 1. Include CODE_BLOCK_CLIENT_JS — exposes `window.__codeBlock` + `renderRows`.
+ * 1. Include CODE_BLOCK_CLIENT_JS — exposes `window.__codeBlock` + `renderRows`
+ *    + the shared `esc`/`lbl` helpers.
  * 2. Track dirty state; post `markDirty` once per session.
  * 3. Title blur → `validateName`; render `nameValidation` reply inline.
  * 4. Code changes → `detectVars { blockIndex, code }`; merge reply to var inputs.
@@ -415,12 +418,15 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     if (vars.length === 0) { varsSec.style.display = 'none'; return; }
     varsSec.style.display = '';
     const rows = vars.map(function(v) {
-      const hint  = v.name.startsWith('VK-') ? v.name.slice(3) : v.name;
-      const label = hint.charAt(0).toUpperCase() + hint.slice(1).toLowerCase().replace(/_/g, ' ');
-      return '<tr class="var-row" data-var="' + v.name + '" data-block="' + blockIndex + '">' +
-        '<td class="var-name">' + label + '</td>' +
+      // esc() is mandatory here: v.name/v.defaultValue come from vault-file
+      // content re-parsed after a save round-trip (fileUpdated), so they are
+      // untrusted input crossing the webview boundary — an unescaped quote
+      // would break out of the data-var/value attributes.
+      const safeName = esc(v.name);
+      return '<tr class="var-row" data-var="' + safeName + '" data-block="' + blockIndex + '">' +
+        '<td class="var-name">' + esc(lbl(v.name)) + '</td>' +
         '<td class="var-default">' +
-          '<input type="text" class="var-input" data-var="' + v.name + '" data-block="' + blockIndex + '" value="' + v.defaultValue + '" placeholder="Default value">' +
+          '<input type="text" class="var-input" data-var="' + safeName + '" data-block="' + blockIndex + '" value="' + esc(v.defaultValue) + '" placeholder="Default value">' +
         '</td></tr>';
     }).join('');
     varsSec.innerHTML = '<div class="slabel">Variables</div><table class="vars-table"><tbody>' + rows + '</tbody></table>';
