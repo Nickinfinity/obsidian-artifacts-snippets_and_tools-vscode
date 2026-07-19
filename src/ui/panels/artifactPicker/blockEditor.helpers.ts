@@ -11,9 +11,6 @@
  */
 import { LANG_ALIAS, LANG_EXT } from '../../../types/constants.js';
 
-/** Debounce window (ms) reserved for future live operations; unused while sync is save-only. */
-export const BLOCK_EDIT_DEBOUNCE_MS = 300;
-
 /** Fence info-strings that are not real languages — ignored by `resolveLangId`. */
 const GENERIC_FENCE_LANGS = new Set(['', 'code', 'vks']);
 
