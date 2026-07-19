@@ -6,20 +6,13 @@
  * hljs and Obsidian expect (e.g. `typescriptreact` vs `tsx`). This module
  * provides a single lookup point so all callers stay consistent.
  *
- * Adding a new alias is a one-line change to `MAP`.
+ * The table itself lives in `types/constants.ts` as `LANG_FENCE`, beside the
+ * two language tables it must agree with (`LANG_ALIAS`, `LANG_EXT`), so drift
+ * between them is visible in one file and testable from one import. Adding a
+ * new alias is a one-line change there.
  */
 
-// ── Mapping table ─────────────────────────────────────────────────────────────
-
-/** VS Code languageId → conventional fence info-string. */
-const MAP: Readonly<Record<string, string>> = {
-    typescriptreact: 'tsx',
-    javascriptreact: 'jsx',
-    shellscript: 'bash',
-    dockerfile: 'dockerfile',
-    'objective-c': 'objc',
-    'objective-cpp': 'objcpp',
-};
+import { LANG_FENCE } from '../types/constants.js';
 
 // ── Export ────────────────────────────────────────────────────────────────────
 
@@ -37,5 +30,5 @@ const MAP: Readonly<Record<string, string>> = {
  * mapLanguageId('')                // ''
  */
 export function mapLanguageId(id: string): string {
-    return MAP[id] ?? id;
+    return LANG_FENCE[id] ?? id;
 }
