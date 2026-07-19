@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { detectVaultDirs } from './vault.service.js';
 import { ARTIFACTS } from '../types/constants.js';
+import { getVaultPath } from './config.service.js';
 
 /** Prefix shared by all extension context keys — matches the VS Code settings namespace */
 const CTX = 'obsidian-artifacts';
@@ -99,10 +100,7 @@ async function setVaultContextKeys(vaultPath: string | null): Promise<void> {
  * await refreshVaultContext();
  */
 export async function refreshVaultContext(): Promise<void> {
-	const vaultPath = vscode.workspace
-		.getConfiguration('obsidianArtifacts')
-		.get<string>('vaultPath', '')
-		.trim();
+	const vaultPath = getVaultPath();
 
 	await setVaultContextKeys(vaultPath.length > 0 ? vaultPath : null);
 }

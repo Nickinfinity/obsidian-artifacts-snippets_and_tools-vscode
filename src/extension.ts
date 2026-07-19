@@ -6,6 +6,7 @@ import { refreshVaultContext } from './services/context.service.js';
 import { createVaultDirectory } from './services/vault.service.js';
 import { sweepBlockEditOrphans } from './ui/panels/artifactPicker/blockEditor.js';
 import { ARTIFACTS } from './types/constants.js';
+import { CONFIG_SECTION, getVaultPath } from './services/config.service.js';
 
 /**
  * Called by VS Code when the extension is first activated.
@@ -30,10 +31,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	await refreshVaultContext();
 
 	// Auto-open Settings on first use (no vault configured yet)
-	const vaultPath = vscode.workspace
-		.getConfiguration('obsidianArtifacts')
-		.get<string>('vaultPath', '')
-		.trim();
+	const vaultPath = getVaultPath();
 
 	if (!vaultPath) {
 		vscode.commands.executeCommand('obsidian-artifacts.settings');
@@ -42,14 +40,15 @@ export async function activate(context: vscode.ExtensionContext) {
 	// React to any obsidianArtifacts.* setting change (Settings Sync, manual edits, etc.)
 	context.subscriptions.push(
 		vscode.workspace.onDidChangeConfiguration((e) => {
-			if (!e.affectsConfiguration('obsidianArtifacts')) { return; }
+			if (!e.affectsConfiguration(CONFIG_SECTION)) { return; }
 
-			const config = vscode.workspace.getConfiguration('obsidianArtifacts');
-			const changedVaultPath = config.get<string>('vaultPath', '').trim();
+			const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+			const changedVaultPath = getVaultPath();
 
 			// When feature flags arrive via Settings Sync, ensure enabled dirs exist on disk.
 			// Only CREATE — never auto-delete to prevent accidental data loss.
-			if (changedVaultPath && e.affectsConfiguration('obsidianArtifacts.features')) {
+			const featuresKey = `${CONFIG_SECTION}.features`;
+			if (changedVaultPath && e.affectsConfiguration(featuresKey)) {
 				for (const artifact of ARTIFACTS) {
 					const enabled = config.get<boolean>(
 						`features.${artifact.dir.toLowerCase()}`,

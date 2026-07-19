@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import type { ParsedArtifactFile, ParsedVar } from '../types/parsed-artifact.types.js';
 import type { ApplyChange, ApplyResult, VarSetMatch, VarSubSet } from '../types/varset.types.js';
+import type { ArtifactFormModel } from '../types/artifact-form.types.js';
 import { parseFromContent } from './parser.service.js';
 
 /**
@@ -227,4 +228,43 @@ export function applyVarSet(
     }
 
     return { values, changes };
+}
+
+/**
+ * Builds the `ArtifactFormModel` for a saved variable set, ready for
+ * `serializeArtifact`.
+ *
+ * Lives here rather than in the picker controller so the save-as payload is
+ * domain logic with a unit test, not UI wiring — and so the one `.md` writer
+ * stays the only code path that turns a model into file bytes.
+ *
+ * @param title       - Display title, written verbatim into the frontmatter.
+ * @param description - Optional description; omitted from output when empty.
+ * @param tags        - Tags copied from the active artifact's frontmatter.
+ * @param entries     - Ordered `[name, value]` pairs for the `vks` fence.
+ * @returns A single-block `type: variables` model.
+ *
+ * @example
+ * buildVarSetModel('Local Dev', '', ['api'], [['VK-host', 'localhost']]);
+ * // → { type: 'variables', title: 'Local Dev', …, blocks: [{ vars: [{ name: 'VK-host', defaultValue: 'localhost' }] }] }
+ */
+export function buildVarSetModel(
+    title:       string,
+    description: string,
+    tags:        string[],
+    entries:     [string, string][],
+): ArtifactFormModel {
+    return {
+        type:        'variables',
+        title,
+        description,
+        tags,
+        blocks: [{
+            heading:     '',
+            description: '',
+            language:    '',
+            code:        '',
+            vars:        entries.map(([name, defaultValue]) => ({ name, defaultValue })),
+        }],
+    };
 }

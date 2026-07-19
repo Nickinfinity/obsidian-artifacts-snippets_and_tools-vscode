@@ -1,6 +1,6 @@
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { ARTIFACTS } from '../types/constants.js';
+import { getEntry } from './artifact-type-config.service.js';
 import type { ArtifactType } from '../types/parsed-artifact.types.js';
 
 // ── Public types ──────────────────────────────────────────────────────────────
@@ -69,8 +69,7 @@ export async function writeArtifact(args: WriteArgs): Promise<WriteResult> {
         }
 
         // ── 2. Auto-create base dir ────────────────────────────────────────
-        const baseDirName = findBaseDir(args.type);
-        const baseDir = vscode.Uri.joinPath(args.vaultRoot, baseDirName);
+        const baseDir = vscode.Uri.joinPath(args.vaultRoot, getEntry(args.type).dir);
         await vscode.workspace.fs.createDirectory(baseDir);
 
         // ── 3. Collision check ─────────────────────────────────────────────
@@ -92,23 +91,6 @@ export async function writeArtifact(args: WriteArgs): Promise<WriteResult> {
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
-
-/**
- * Returns the vault subdirectory name for the given artifact type.
- *
- * @param type - Artifact type literal.
- * @returns Directory name (e.g. `'Snippets'` for `'snippet'`).
- * @throws When no matching entry is found in `ARTIFACTS`.
- *
- * @example
- * findBaseDir('snippet') // 'Snippets'
- * findBaseDir('command') // 'Commands'
- */
-function findBaseDir(type: ArtifactType): string {
-    const entry = ARTIFACTS.find(a => a.type === type);
-    if (!entry) { throw new Error(`Unknown artifact type: ${type}`); }
-    return entry.dir;
-}
 
 /**
  * Returns `true` when `candidate` is equal to or nested within `root`.

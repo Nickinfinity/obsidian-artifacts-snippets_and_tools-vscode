@@ -1,4 +1,6 @@
-import { escHtml, FREE_LANGUAGE_OPTIONS } from './form.helpers.js';
+import { escHtml } from '../../../utils/html.js';
+import { labelForVar } from '../artifactPicker/preview.helpers.js';
+import { FREE_LANGUAGE_OPTIONS } from './form.helpers.js';
 import type { ArtifactFormBlock, ArtifactFormModel } from '../../../types/artifact-form.types.js';
 import type { ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { LanguageMode } from '../../../types/artifact.types.js';
@@ -79,9 +81,7 @@ export function buildVarsTable(vars: ParsedVar[], blockIndex: number): string {
     const rows = vars.map(v => {
         const safeName  = escHtml(v.name);
         const safeVal   = escHtml(v.defaultValue);
-        const hint      = v.name.startsWith('VK-') ? v.name.slice(3) : v.name;
-        const label     = hint.split('_').join(' ');
-        const safeLabel = escHtml(label.charAt(0).toUpperCase() + label.slice(1).toLowerCase());
+        const safeLabel = escHtml(labelForVar(v.name));
         return `      <tr class="var-row" data-var="${safeName}" data-block="${blockIndex}">
         <td class="var-name">${safeLabel}</td>
         <td class="var-default">

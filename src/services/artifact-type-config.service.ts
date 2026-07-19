@@ -5,19 +5,23 @@ import type { ArtifactType } from '../types/parsed-artifact.types.js';
 /**
  * Locates the `ARTIFACTS` entry for a given type literal.
  *
- * Thin private helper so every public accessor delegates here — the rest of
- * the codebase never traverses `ARTIFACTS` directly. Throws on miss so a
- * caller passing an unrecognised type fails loudly instead of silently
- * receiving `undefined`.
+ * **This is the only place that traverses `ARTIFACTS` by type.** Six other call
+ * sites used to open-code `ARTIFACTS.find(a => a.type === …)` — including one
+ * that re-threw a character-identical error message — so this is enforced by
+ * `test/artifact-type-config.test.ts` rather than asserted in prose.
+ *
+ * Throws on miss so a caller passing an unrecognised type fails loudly instead
+ * of silently receiving `undefined`.
  *
  * @param type - Canonical `ArtifactType` literal.
  * @returns The matching `Artifact` entry.
  * @throws When no entry has a matching `type` field.
  *
  * @example
- * findEntry('snippet'); // → { type: 'snippet', dir: 'Snippets', form: { ... }, ... }
+ * getEntry('snippet'); // → { type: 'snippet', dir: 'Snippets', form: { ... }, ... }
+ * getEntry('snippet').dir; // → 'Snippets'
  */
-function findEntry(type: ArtifactType): Artifact {
+export function getEntry(type: ArtifactType): Artifact {
     const entry = ARTIFACTS.find(e => e.type === type);
     if (!entry) {
         throw new Error(`Unknown artifact type: ${type}`);
@@ -41,7 +45,7 @@ function findEntry(type: ArtifactType): Artifact {
  * getFormConfig('command'); // → { language: { mode: 'locked', default: 'bash' }, label: { singular: 'command' }, multiBlock: true }
  */
 export function getFormConfig(type: ArtifactType): ArtifactTypeFormConfig {
-    const entry = findEntry(type);
+    const entry = getEntry(type);
     if (entry.createForm !== true || !entry.form) {
         throw new Error(`Artifact type "${type}" is not create-form-enabled`);
     }
@@ -122,6 +126,23 @@ export function canMultiBlock(type: ArtifactType): boolean {
 }
 
 /**
+ * Returns every artifact type declared in `ARTIFACTS`, in declaration order.
+ *
+ * The parser uses this to decide which frontmatter `type:` values are valid,
+ * so a type added to `ARTIFACTS` is accepted immediately. Before this existed
+ * the parser carried its own hardcoded list and silently downgraded any type
+ * missing from it to `'snippet'`.
+ *
+ * @returns Array of every `ArtifactType` literal.
+ *
+ * @example
+ * getAllTypes(); // → ['snippet', 'agent', 'command', 'template', 'variables']
+ */
+export function getAllTypes(): ArtifactType[] {
+    return ARTIFACTS.map(e => e.type);
+}
+
+/**
  * Returns the list of types that surface in the create-flow type picker.
  *
  * Derived from `ARTIFACTS` — any entry with `createForm === true` is
@@ -135,4 +156,25 @@ export function canMultiBlock(type: ArtifactType): boolean {
  */
 export function getCreateFormTypes(): ArtifactType[] {
     return ARTIFACTS.filter(e => e.createForm === true).map(e => e.type);
+}
+
+/**
+ * Resolves the artifact type that owns a vault directory name.
+ *
+ * The directory is the type declaration for files that carry no frontmatter —
+ * a real vault `Commands/` file usually starts straight at `## heading`, and
+ * the user already declared its kind by filing it there. `ARTIFACTS` treats the
+ * directory as authoritative for menus, context keys and command registration;
+ * this makes parsing agree with them.
+ *
+ * @param dirName - Bare directory name as it appears in the vault (e.g. `'Commands'`). Case-insensitive.
+ * @returns The owning `ArtifactType`, or `undefined` when no entry claims that directory.
+ *
+ * @example
+ * getTypeForDir('Commands'); // → 'command'
+ * getTypeForDir('Whatever'); // → undefined
+ */
+export function getTypeForDir(dirName: string): ArtifactType | undefined {
+    const target = dirName.toLowerCase();
+    return ARTIFACTS.find(a => a.dir.toLowerCase() === target)?.type;
 }

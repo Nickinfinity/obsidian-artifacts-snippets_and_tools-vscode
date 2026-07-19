@@ -1,5 +1,14 @@
 import * as assert from 'node:assert';
-import { renderCodeHtml } from '../src/services/render.service.js';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { renderCodeHtml, renderCodeRowsHtml } from '../src/services/render.service.js';
+import {
+    renderPreviewHtml,
+    renderMultiBlockPreviewHtml,
+    renderPopupEmptyHtml,
+    mergeVarsWithDefaults,
+} from '../src/ui/panels/artifactPicker/preview.render.js';
+import type { ParsedArtifactFile } from '../src/types/parsed-artifact.types.js';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -312,4 +321,126 @@ suite('renderCodeHtml — VK-var highlighting', () => {
         );
     });
 
+});
+
+// ── Phase 6: preview.render.ts (moved from preview.ts) ───────────────────────
+
+/**
+ * mergeVarsWithDefaults — three-tier var resolution used by `handleInsert`.
+ * Moved from preview.ts to preview.render.ts in Phase 6; had no prior
+ * dedicated test, so this suite is new coverage, not a relocation.
+ */
+suite('mergeVarsWithDefaults', () => {
+
+    test('user-typed value wins over the default', () => {
+        const result = mergeVarsWithDefaults(
+            { 'VK-host': 'typed.example.com' },
+            [{ name: 'VK-host', defaultValue: 'localhost' }],
+        );
+        assert.strictEqual(result['VK-host'], 'typed.example.com');
+    });
+
+    test('empty user input falls back to defaultValue', () => {
+        const result = mergeVarsWithDefaults(
+            { 'VK-host': '' },
+            [{ name: 'VK-host', defaultValue: 'localhost' }],
+        );
+        assert.strictEqual(result['VK-host'], 'localhost');
+    });
+
+    test('neither user input nor default → key is omitted (token survives resolveVars)', () => {
+        const result = mergeVarsWithDefaults(
+            {},
+            [{ name: 'VK-host', defaultValue: '' }],
+        );
+        assert.strictEqual(Object.hasOwn(result, 'VK-host'), false);
+    });
+
+    test('raw map missing the var entirely still falls back to defaultValue', () => {
+        const result = mergeVarsWithDefaults(
+            {},
+            [{ name: 'VK-port', defaultValue: '8080' }],
+        );
+        assert.strictEqual(result['VK-port'], '8080');
+    });
+});
+
+/**
+ * Golden/uniqueness tests for renderPreviewHtml et al. — Phase 6 moved these
+ * out of preview.ts into preview.render.ts and collapsed the webview-side
+ * `esc`/`lbl` copies into one shared snippet (`webviewSnippets.ts`). This
+ * fixture deliberately carries a defaultValue with `"` and `'` so the golden
+ * captures the new 5-char client-side escaping.
+ */
+suite('renderPreviewHtml — Phase 6 render-level golden', () => {
+
+    const FIXTURE: ParsedArtifactFile = {
+        filePath:     '/vault/Snippets/demo.md',
+        fileName:     'demo',
+        relativePath: 'demo.md',
+        frontmatter: {
+            type:        'snippet',
+            title:       'Demo Snippet',
+            description: 'A demo artifact for golden tests.',
+            language:    'javascript',
+            tags:        ['demo', 'golden'],
+        },
+        code: 'console.log(<VK-msg>);',
+        vars: [{ name: 'VK-msg', defaultValue: `it's "ok"` }],
+        blocks: [],
+    };
+
+    const SNAPSHOT_DIR = path.join(__dirname, '../../test/fixtures/preview-render-golden');
+
+    /**
+     * Writes or compares an HTML snapshot for this suite only.
+     *
+     * @param name   - Snapshot file name (without extension).
+     * @param actual - HTML string to compare or record.
+     */
+    function snapshot(name: string, actual: string): void {
+        const filePath = path.join(SNAPSHOT_DIR, `${name}.html`);
+        if (process.env['UPDATE_SNAPSHOTS']) {
+            fs.mkdirSync(SNAPSHOT_DIR, { recursive: true });
+            fs.writeFileSync(filePath, actual, 'utf8');
+            return;
+        }
+        let expected: string;
+        try {
+            expected = fs.readFileSync(filePath, 'utf8');
+        } catch {
+            throw new Error(`Snapshot missing: ${filePath}\nRun with UPDATE_SNAPSHOTS=1 to generate.`);
+        }
+        assert.strictEqual(actual, expected, `Snapshot mismatch: ${name}`);
+    }
+
+    test('output is byte-identical to the locked golden', () => {
+        const codeRowsHtml = renderCodeRowsHtml(FIXTURE.code, FIXTURE.frontmatter.language);
+        const html = renderPreviewHtml(FIXTURE, codeRowsHtml, 'test-nonce-abc123', 'https://test-css-uri/styles.css', 'https://test-csp-source', {});
+        snapshot('demo-snippet', html);
+    });
+
+    test('the shared esc/lbl function bodies appear exactly once in the generated document', () => {
+        const codeRowsHtml = renderCodeRowsHtml(FIXTURE.code, FIXTURE.frontmatter.language);
+        const html = renderPreviewHtml(FIXTURE, codeRowsHtml, 'test-nonce-abc123', 'https://test-css-uri/styles.css', 'https://test-csp-source', {});
+        assert.strictEqual(countMatches(html, /function esc\(/), 1);
+        assert.strictEqual(countMatches(html, /function lbl\(/), 1);
+    });
+
+    test('renderMultiBlockPreviewHtml — read-only preview does not embed a <script> tag', () => {
+        const html = renderMultiBlockPreviewHtml(
+            FIXTURE,
+            [{ heading: 'Block A', codeHtml: renderCodeHtml('a();', 'javascript'), vars: [], description: '' }],
+            'https://test-css-uri/styles.css',
+            'https://test-csp-source',
+        );
+        assert.ok(!html.includes('<script'));
+        assert.ok(html.includes('Block A'));
+    });
+
+    test('renderPopupEmptyHtml — no script tag, no esc/lbl duplication concern', () => {
+        const html = renderPopupEmptyHtml('https://test-css-uri/styles.css', 'https://test-csp-source');
+        assert.ok(!html.includes('<script'));
+        assert.ok(html.includes('Select a file to preview'));
+    });
 });

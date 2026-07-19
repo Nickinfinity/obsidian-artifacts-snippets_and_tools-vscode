@@ -1,12 +1,24 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
+import { getAllTypes, getTypeForDir } from './artifact-type-config.service.js';
 import type { ArtifactType, ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar } from '../types/parsed-artifact.types.js';
 
 // Accepted `type` values — any unrecognised value keeps the 'snippet' fallback.
-const VALID_TYPES = new Set<string>(['snippet', 'template', 'command', 'agent', 'variables']);
+// Derived from ARTIFACTS so a type added there is accepted here immediately;
+// as a hardcoded list this silently downgraded unlisted types to 'snippet'.
+// Guarded by the drift test in test/constants.test.ts.
+const VALID_TYPES = new Set<string>(getAllTypes());
 
 // Frontmatter keys copied verbatim into `ParsedFrontmatter` (string-typed).
-const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);
+/**
+ * Frontmatter keys the parser reads as plain single-line strings.
+ *
+ * Exported so `test/frontmatter-keys.test.ts` can bind this list to the
+ * serializer's `FRONTMATTER_KEY_ORDER`: a key the serializer emits but this set
+ * (plus the specially-handled `type` and `tags`) does not know is silently
+ * dropped on the next read.
+ */
+export const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);
 
 // Shared regex constants — declared once to avoid SonarQube duplicated-literal flags
 // and to keep parsing rules in a single source of truth.
@@ -14,7 +26,21 @@ const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---/;
 const FRONTMATTER_STRIP_RE = /^---\r?\n[\s\S]*?\r?\n---\r?\n?/;
 const CODE_FENCE_RE        = /```(\w*)\r?\n([\s\S]*?)```/;
 const VKS_FENCE_RE         = /```vks\r?\n([\s\S]*?)```/;
-const VK_TOKEN_RE          = /<VK-([A-Za-z]\w*)>/g;
+
+/**
+ * Matches a `<VK-Hint>` variable token, where `Hint` starts with a letter.
+ *
+ * Exported so `render.service.ts` highlights exactly the tokens this parser
+ * detects — the two drifted apart as separate literals before Phase 1.
+ *
+ * **Carries the `/g` flag**, so it holds `lastIndex` state. Only use it with
+ * `matchAll` or `replace`/`replaceAll`, which reset `lastIndex` themselves;
+ * never with a bare `.test()` or `.exec()` loop.
+ *
+ * @example
+ * 'x = <VK-host>'.replaceAll(VK_TOKEN_RE, 'v')  // → 'x = v'
+ */
+export const VK_TOKEN_RE = /<VK-([A-Za-z]\w*)>/g;
 
 /**
  * Extracts and parses the YAML frontmatter block from raw vault file content.
@@ -28,8 +54,8 @@ const VK_TOKEN_RE          = /<VK-([A-Za-z]\w*)>/g;
  * @example
  * parseFrontmatter('---\ntype: template\ntitle: React Component\nlanguage: tsx\n---\n')
  */
-function parseFrontmatter(content: string): ParsedFrontmatter {
-    const result: ParsedFrontmatter = { type: 'snippet' };
+function parseFrontmatter(content: string, defaultType: ArtifactType = 'snippet'): ParsedFrontmatter {
+    const result: ParsedFrontmatter = { type: defaultType };
     const match = FRONTMATTER_BLOCK_RE.exec(content);
     if (!match) { return result; }
 
@@ -341,7 +367,11 @@ function mergeVarDefaults(detected: ParsedVar[], defaults: ParsedVar[]): ParsedV
  * parseFromContent(content, uri.fsPath, rootUri.fsPath);
  */
 export function parseFromContent(content: string, filePath: string, artifactRootDir: string): ParsedArtifactFile {
-    const frontmatter = parseFrontmatter(content);
+    // A file with no `type:` is typed by the directory it was filed in — vault
+    // files routinely carry no frontmatter at all, and without this a
+    // `Commands/` file parsed as 'snippet' and inserted at the cursor instead
+    // of being sent to the terminal.
+    const frontmatter = parseFrontmatter(content, getTypeForDir(path.basename(artifactRootDir)));
     const { code, fenceLang } = parseCodeBlock(content);
     if (!frontmatter.language && fenceLang) { frontmatter.language = fenceLang; }
     return {

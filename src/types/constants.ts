@@ -76,9 +76,13 @@ export const ARTIFACTS: ArtifactsArray = [
  * `html`, `css`, `go`, `java`, `sql`, …) skip this map — `resolveLangId` validates
  * them directly against `vscode.languages.getLanguages()`.
  *
- * This is the **inverse** of `language-map.service.ts`'s `mapLanguageId`
- * (languageId → fence info-string). Keep the two directions consistent — if a
- * mapping is added here, the reverse mapping should agree.
+ * `LANG_FENCE` below is the **partial** inverse of this map, not the full one.
+ * A full inverse is impossible: this map carries *shorthand* (`py3`, `cjs`,
+ * `c++`), and inverting it would emit those as fence strings — `python` would
+ * serialize as ```` ```py3 ````. `LANG_FENCE` therefore carries only the ids
+ * that are not themselves valid fence strings, and
+ * `test/language-consistency.test.ts` — not this comment — is what keeps the
+ * two tables agreeing.
  *
  * @example
  * LANG_ALIAS['js']   // → 'javascript'
@@ -108,9 +112,38 @@ export const LANG_ALIAS: Record<string, string> = {
 	'c#': 'csharp',
 	cs: 'csharp',
 	kt: 'kotlin',
-	'objective-c': 'objc',
+	// `objc`/`objcpp` are the fence strings; `objective-c`/`objective-cpp` are the
+	// real VS Code languageIds that `resolveLangId` validates against.
+	objc: 'objective-c',
+	objcpp: 'objective-cpp',
 	ps1: 'powershell',
 	htm: 'html',
+};
+
+/**
+ * Canonical VS Code `languageId` → markdown code-fence info-string.
+ *
+ * The direction used when *writing* a fence (e.g. capturing an editor selection
+ * into a new artifact). Only ids whose conventional fence string **differs**
+ * from the id belong here — `mapLanguageId` passes anything else through
+ * unchanged, so `javascript` stays ```` ```javascript ````.
+ *
+ * This is the partial inverse of `LANG_ALIAS`; see that map's note for why it
+ * cannot be derived from it. Guard 1 of `test/language-consistency.test.ts`
+ * asserts every entry here round-trips: `normalizeLangId(fence) === id`.
+ *
+ * @example
+ * LANG_FENCE['typescriptreact'] // → 'tsx'
+ * LANG_FENCE['shellscript']     // → 'bash'
+ * LANG_FENCE['objective-c']     // → 'objc'
+ */
+export const LANG_FENCE: Readonly<Record<string, string>> = {
+	typescriptreact: 'tsx',
+	javascriptreact: 'jsx',
+	shellscript: 'bash',
+	dockerfile: 'dockerfile',
+	'objective-c': 'objc',
+	'objective-cpp': 'objcpp',
 };
 
 /**
@@ -152,7 +185,8 @@ export const LANG_EXT: Record<string, string> = {
 	sql: 'sql',
 	markdown: 'md',
 	xml: 'xml',
-	objc: 'm',
+	'objective-c': 'm',
+	'objective-cpp': 'mm',
 	dockerfile: 'dockerfile',
 	plaintext: 'txt',
 };

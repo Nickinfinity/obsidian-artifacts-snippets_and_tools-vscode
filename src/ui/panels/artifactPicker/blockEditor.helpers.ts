@@ -11,9 +11,6 @@
  */
 import { LANG_ALIAS, LANG_EXT } from '../../../types/constants.js';
 
-/** Debounce window (ms) reserved for future live operations; unused while sync is save-only. */
-export const BLOCK_EDIT_DEBOUNCE_MS = 300;
-
 /** Fence info-strings that are not real languages — ignored by `resolveLangId`. */
 const GENERIC_FENCE_LANGS = new Set(['', 'code', 'vks']);
 
@@ -94,21 +91,4 @@ export function extForLang(langId: string): string {
         return mapped;
     }
     return FILENAME_SAFE_EXT_RE.test(langId) ? langId : 'txt';
-}
-
-/**
- * Converts an artifact title to a lowercase-hyphenated slug for the temp file name.
- *
- * @param title - Artifact title (may contain spaces, punctuation, mixed case).
- * @returns A slug containing only `[a-z0-9-]`, with no leading/trailing hyphens.
- *
- * @example
- * slug('My Snippet Title') // → 'my-snippet-title'
- * slug('Hello, World!')    // → 'hello-world'
- */
-export function slug(title: string): string {
-    return title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')   // non-alphanumeric runs → single hyphen
-        .replace(/^-+|-+$/g, '');      // trim leading/trailing hyphens
 }

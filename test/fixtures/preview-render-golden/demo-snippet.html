@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; style-src https://test-csp-source 'unsafe-inline'; script-src 'nonce-test-nonce-abc123';">
+<link rel="stylesheet" href="https://test-css-uri/styles.css">
+</head>
+<body class="popup-body">
+  <h1>Demo Snippet</h1>
+  <div class="badges">
+    <span class="badge">snippet</span>
+    <span class="badge lang">javascript</span>
+    
+  </div>
+  <p class="desc">A demo artifact for golden tests.</p>
+  <div class="tags"><span class="tag">demo</span><span class="tag">golden</span></div>
+  
+  <div class="slabel">Content <span class="slabel-hint">— editable, not saved to .md</span></div>
+  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false" data-lang="javascript"><div class="code-line-row"><span class="line-number" contenteditable="false">1</span><span class="code-content"><span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="vk-var">&lt;VK-msg&gt;</span>);</span></div></div>
+  <div class="slabel">Variables</div>
+  <div id="varsSection">
+    <div class="inputs" id="varInputs">
+             <div class="input-row">
+               <label for="v-VK-msg">Msg</label>
+               <input id="v-VK-msg" data-var="VK-msg" type="text"
+                      value="it&#39;s &quot;ok&quot;" placeholder="Msg">
+               
+             </div></div>
+    <div class="actions varset-actions">
+      <button class="btn btn-secondary" id="applyVarSetBtn">Apply Variable Set</button>
+      <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn btn-insert"    id="insertBtn">Insert</button>
+    <button class="btn btn-secondary" id="editBlockBtn">Edit Block</button>
+    <button class="btn btn-secondary" id="editBtn">Edit .md</button>
+    <button class="btn btn-cancel"    id="cancelBtn">Cancel</button>
+  </div>
+  <p class="path">demo.md</p>
+<script nonce="test-nonce-abc123">
+(function () {
+  const vscode = acquireVsCodeApi();
+  
+  function esc(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+  }
+  function lbl(name) {
+    const hint = name.indexOf('VK-') === 0 ? name.slice(3) : name;
+    const j    = hint.split('_').join(' ').toLowerCase();
+    return j.charAt(0).toUpperCase() + j.slice(1);
+  }
+
+  // ── Code-block client (Part 2) ──────────────────────────────────────────
+  const codeWrapper = document.getElementById('codeWrapper');
+
+  function extractCode() {
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    if (rows.length === 0) { return codeWrapper.textContent || ''; }
+    const parts = [];
+    rows.forEach(r => {
+      const c = r.querySelector('.code-content');
+      parts.push(c ? c.textContent : '');
+    });
+    return parts.join('\n');
+  }
+
+  function vkWrap(html) {
+    return html.replace(/&lt;VK-([A-Za-z]\w*)&gt;/g, '<span class="vk-var">&lt;VK-$1&gt;</span>');
+  }
+  function renderRows(code) {
+    const lines = code.split('\n');
+    return lines.map(function (line, i) {
+      return '<div class="code-line-row"><span class="line-number" contenteditable="false">' +
+        (i + 1) + '</span><span class="code-content">' + vkWrap(esc(line)) + '</span></div>';
+    }).join('');
+  }
+
+  // ── Caret offset (counted across all .code-content text + joining \n) ──
+  function getCaretOffset() {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) { return 0; }
+    const range = sel.getRangeAt(0);
+    if (!codeWrapper.contains(range.endContainer)) { return 0; }
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    let offset = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i].querySelector('.code-content');
+      if (!c) { continue; }
+      if (c.contains(range.endContainer) || c === range.endContainer) {
+        const pre = document.createRange();
+        pre.selectNodeContents(c);
+        pre.setEnd(range.endContainer, range.endOffset);
+        return offset + pre.toString().length;
+      }
+      offset += c.textContent.length + 1;
+    }
+    return offset;
+  }
+  function setCaretOffset(offset) {
+    const rows = codeWrapper.querySelectorAll('.code-line-row');
+    let remaining = offset;
+    for (let i = 0; i < rows.length; i++) {
+      const c = rows[i].querySelector('.code-content');
+      if (!c) { continue; }
+      const len = c.textContent.length;
+      if (remaining <= len) { placeCaret(c, remaining); return; }
+      remaining -= len + 1;
+    }
+    const last = rows[rows.length - 1] && rows[rows.length - 1].querySelector('.code-content');
+    if (last) { placeCaret(last, last.textContent.length); }
+  }
+  function placeCaret(el, off) {
+    let remaining = off, target = null, targetOffset = 0;
+    (function walk(node) {
+      if (target) { return; }
+      if (node.nodeType === 3 /* TEXT_NODE */) {
+        if (remaining <= node.length) { target = node; targetOffset = remaining; }
+        else { remaining -= node.length; }
+        return;
+      }
+      for (let i = 0; i < node.childNodes.length && !target; i++) { walk(node.childNodes[i]); }
+    })(el);
+    const range = document.createRange();
+    if (target) { range.setStart(target, targetOffset); range.collapse(true); }
+    else        { range.selectNodeContents(el); range.collapse(false); }
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // ── Re-render on input (debounced) ────────────────────────────────────
+  let renderTimer;
+  function scheduleRender() {
+    if (renderTimer) { clearTimeout(renderTimer); }
+    renderTimer = setTimeout(function () {
+      renderTimer = undefined;
+      const code  = extractCode();
+      const caret = getCaretOffset();
+      codeWrapper.innerHTML = renderRows(code);
+      setCaretOffset(caret);
+    }, 150);
+  }
+  codeWrapper.addEventListener('input', scheduleRender);
+  codeWrapper.addEventListener('keydown', function (ev) {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      document.execCommand('insertText', false, '\n');
+    }
+  });
+  codeWrapper.addEventListener('paste', function (ev) {
+    ev.preventDefault();
+    const text = (ev.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, text);
+  });
+
+  // Bridge: expose the hooks the outer script needs.
+  window.__codeBlock = {
+    extractCode: extractCode,
+    renderRows:  renderRows,
+    flushPendingRender: function () {
+      if (renderTimer) { clearTimeout(renderTimer); renderTimer = undefined; }
+    },
+    setCode: function (code) {
+      codeWrapper.innerHTML = renderRows(code || '');
+    },
+  };
+
+  const varInputs = document.getElementById('varInputs');
+
+  // ── Buttons ──────────────────────────────────────────────────────────────
+  function collectVars() {
+    const out = {};
+    document.querySelectorAll('[data-var]').forEach(function (el) { out[el.dataset.var] = el.value; });
+    return out;
+  }
+  document.getElementById('insertBtn').addEventListener('click', function () {
+    window.__codeBlock.flushPendingRender();
+    vscode.postMessage({ command: 'insert', vars: collectVars(), code: window.__codeBlock.extractCode() });
+  });
+  document.getElementById('editBlockBtn').addEventListener('click', function () {
+    vscode.postMessage({ command: 'editBlock' });
+  });
+  document.getElementById('editBtn').addEventListener('click', function () {
+    vscode.postMessage({ command: 'fullEdit' });
+  });
+  document.getElementById('cancelBtn').addEventListener('click', function () {
+    vscode.postMessage({ command: 'cancel' });
+  });
+  document.addEventListener('keydown', function (ev) {
+    if ((ev.ctrlKey || ev.metaKey) && ev.key === 'Enter') {
+      ev.preventDefault();
+      document.getElementById('insertBtn').click();
+    }
+  });
+
+  // ── Variable-set buttons ─────────────────────────────────────────────────
+  const varsSection = document.getElementById('varsSection');
+  let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
+
+  function refreshSaveBtn() {
+    const btn = document.getElementById('saveAsVarSetBtn');
+    if (!btn) { return; }
+    const hasValue = Object.values(collectVars()).some(function (v) { return v && v.length > 0; });
+    btn.style.display = hasValue ? '' : 'none';
+  }
+
+  const applyBtn = document.getElementById('applyVarSetBtn');
+  if (applyBtn) {
+    applyBtn.addEventListener('click', function () {
+      vscode.postMessage({ command: 'pickVarSet', values: collectVars() });
+    });
+  }
+  const saveBtn = document.getElementById('saveAsVarSetBtn');
+  if (saveBtn) {
+    saveBtn.addEventListener('click', function () {
+      vscode.postMessage({ command: 'saveAsVarSet', values: collectVars() });
+    });
+  }
+  varInputs.addEventListener('input', function (ev) {
+    const t = ev.target;
+    if (t && t.dataset && t.dataset.var) {
+      // Manual edit removes the source badge for this var.
+      const badge = varInputs.querySelector('[data-var-source="' + t.dataset.var + '"]');
+      if (badge) {
+        badge.remove();
+        vscode.postMessage({ command: 'clearVarSource', name: t.dataset.var });
+      }
+    }
+    refreshSaveBtn();
+  });
+  refreshSaveBtn();
+
+  // ── updateVars / fileUpdated incoming messages ──────────────────────────
+  function rebuildVarInputs(vars) {
+    const existing = collectVars();
+    if (!vars || vars.length === 0) {
+      varInputs.innerHTML = '<p class="muted">No variables defined.</p>';
+      return;
+    }
+    varInputs.innerHTML = vars.map(function (v) {
+      const value = existing[v.name] !== undefined ? existing[v.name] : (v.defaultValue || '');
+      return '<div class="input-row">' +
+        '<label for="v-' + esc(v.name) + '">' + esc(lbl(v.name)) + '</label>' +
+        '<input id="v-' + esc(v.name) + '" data-var="' + esc(v.name) + '" type="text" value="' + esc(value) + '" placeholder="' + esc(lbl(v.name)) + '">' +
+      '</div>';
+    }).join('');
+  }
+  // ── Var-set diff / applied / cancelled handlers ─────────────────────────
+  function showDiffView(html) {
+    if (!varsSection) { return; }
+    if (savedVarsHtml === null) { savedVarsHtml = varsSection.innerHTML; }
+    varsSection.innerHTML = html;
+    const applyBtn  = document.getElementById('varSetApplyBtn');
+    const cancelBtn = document.getElementById('varSetCancelBtn');
+    if (applyBtn)  { applyBtn.addEventListener('click',  function () { vscode.postMessage({ command: 'confirmApply' }); }); }
+    if (cancelBtn) { cancelBtn.addEventListener('click', function () { vscode.postMessage({ command: 'cancelApply'  }); }); }
+  }
+  function restoreVarsView() {
+    if (!varsSection || savedVarsHtml === null) { return; }
+    varsSection.innerHTML = savedVarsHtml;
+    savedVarsHtml = null;
+    refreshSaveBtn();
+  }
+  function applyValuesAndBadges(values, subSetName, varNames) {
+    restoreVarsView();
+    const inputs = document.querySelectorAll('[data-var]');
+    inputs.forEach(function (el) {
+      const name = el.dataset.var;
+      if (Object.prototype.hasOwnProperty.call(values, name)) { el.value = values[name]; }
+    });
+    const flagged = new Set(varNames || []);
+    flagged.forEach(function (name) {
+      const input = varInputs.querySelector('[data-var="' + name + '"]');
+      if (!input) { return; }
+      const row = input.closest('.input-row');
+      if (!row) { return; }
+      const existing = row.querySelector('[data-var-source]');
+      if (existing) { existing.remove(); }
+      const badge = document.createElement('span');
+      badge.className = 'var-source';
+      badge.dataset.varSource = name;
+      badge.textContent = 'from: ' + subSetName;
+      row.appendChild(badge);
+    });
+    refreshSaveBtn();
+  }
+
+  window.addEventListener('message', function (event) {
+    const msg = event.data || {};
+    if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); refreshSaveBtn(); }
+    if (msg.command === 'fileUpdated' && msg.artifact) {
+      window.__codeBlock.setCode(msg.artifact.code || '');
+      rebuildVarInputs(msg.artifact.vars);
+      refreshSaveBtn();
+    }
+    if (msg.command === 'showVarSetDiff') { showDiffView(msg.html); }
+    if (msg.command === 'varSetApplied')  { applyValuesAndBadges(msg.values || {}, msg.subSetName || '', msg.varNames || []); }
+    if (msg.command === 'varSetCancelled'){ restoreVarsView(); }
+  });
+
+})();
+</script>
+</body>
+</html>

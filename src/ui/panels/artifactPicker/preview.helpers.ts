@@ -1,22 +1,10 @@
 import * as vscode from 'vscode';
 import { resolveVars } from '../../../services/parser.service.js';
 import type { ParsedArtifactFile, ParsedBlock } from '../../../types/parsed-artifact.types.js';
+import { styleLinkTags } from '../../../utils/html.js';
 
 /** WebviewPanel viewType used for both the read-only preview and the interactive popup. */
 export const POPUP_VIEW_TYPE = 'obsidianArtifactPopupPreview';
-
-/**
- * Escapes `&`, `<`, `>`, `"`, and `'` for safe HTML text content.
- *
- * @param s - Plain text to escape.
- * @returns HTML-safe string.
- *
- * @example
- * escHtml('<div>') // → '&lt;div&gt;'
- */
-export function escHtml(s: string): string {
-    return s.replaceAll(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!));
-}
 
 /**
  * Converts a `VK-xxx` variable name to a human-readable input label.
@@ -33,7 +21,7 @@ export function escHtml(s: string): string {
  */
 export function labelForVar(name: string): string {
     const hint   = name.startsWith('VK-') ? name.slice(3) : name;
-    const joined = hint.split('_').join(' ').toLowerCase();
+    const joined = hint.replaceAll('_', ' ').toLowerCase();
     return joined.charAt(0).toUpperCase() + joined.slice(1);
 }
 
@@ -49,8 +37,8 @@ export function labelForVar(name: string): string {
  * @example
  * return popupShell('<p>Hello</p>', cssUri, cspSource);
  */
-export function popupShell(body: string, cssUri: string, cspSource = "'unsafe-inline'"): string {
-    const linkTag = cssUri ? `<link rel="stylesheet" href="${cssUri}">` : '';
+export function popupShell(body: string, cssUri: string | string[], cspSource = "'unsafe-inline'"): string {
+    const linkTag = styleLinkTags(cssUri);
     return /* html */`<!DOCTYPE html>
 <html lang="en">
 <head>

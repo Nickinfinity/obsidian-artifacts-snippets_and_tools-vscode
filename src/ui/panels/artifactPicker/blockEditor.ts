@@ -3,7 +3,8 @@ import { parseFromContent } from '../../../services/parser.service.js';
 import { patchBlockCode, type BlockRef } from '../../../services/artifact-patcher.service.js';
 import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js';
 import { blockAsArtifact } from './preview.helpers.js';
-import { extForLang, resolveLangId, slug } from './blockEditor.helpers.js';
+import { slugify } from '../../../services/filename.service.js';
+import { extForLang, resolveLangId } from './blockEditor.helpers.js';
 import { out } from './shared.js';
 
 /**
@@ -99,7 +100,7 @@ export class BlockEditController {
         const known  = await vscode.languages.getLanguages();
         const langId = resolveLangId(language, language, known);
         const ext    = extForLang(langId);
-        const base   = slug(artifact.frontmatter.title || artifact.fileName) || 'block';
+        const base   = slugify(artifact.frontmatter.title || artifact.fileName) || 'block';
 
         // ── Write + open the temp file in extension storage ───────────────────
         const dir     = vscode.Uri.joinPath(this.cb.storageUri, 'blockEdit');

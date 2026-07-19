@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import { applyVarSet } from '../../../services/varset.service.js';
-import { ARTIFACTS } from '../../../types/constants.js';
+import { applyVarSet, buildVarSetModel } from '../../../services/varset.service.js';
+import { serializeArtifact } from '../../../services/artifact-serializer.service.js';
+import { slugify } from '../../../services/filename.service.js';
+import { getEntry } from '../../../services/artifact-type-config.service.js';
+import { getVaultRootUri } from '../../../services/config.service.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
 import type { ApplyResult, VarSubSet } from '../../../types/varset.types.js';
 import { getVarSetScanner, pickVarSet } from '../varsetPicker.panel.js';
@@ -163,8 +165,9 @@ export class VarSetController {
         if (description === undefined) { return; }
 
         const tags    = artifact.frontmatter.tags ?? [];
-        const content = buildVarSetFileContent(title.trim(), description.trim(), tags, nonEmpty);
-        const slug    = slugify(title);
+        const content = serializeArtifact(buildVarSetModel(title.trim(), description.trim(), tags, nonEmpty));
+        // Empty slug (a title of only punctuation) would write a bare `.md`.
+        const slug    = slugify(title) || 'untitled-variable-set';
         const fileUri = vscode.Uri.joinPath(variablesDirUri, `${slug}.md`);
 
         try {
@@ -188,55 +191,9 @@ export class VarSetController {
  * const dir = getVariablesDirUri();
  */
 function getVariablesDirUri(): vscode.Uri | null {
-    const vaultPath = vscode.workspace
-        .getConfiguration('obsidianArtifacts')
-        .get<string>('vaultPath', '')
-        .trim();
-    if (vaultPath.length === 0) { return null; }
-    const variablesDir = ARTIFACTS.find(a => a.dir === 'Variables')?.dir ?? 'Variables';
-    return vscode.Uri.file(path.join(vaultPath, variablesDir));
-}
-
-/**
- * Builds the `.md` file body for a saved variable set.
- *
- * @param title       - Display title — written verbatim into the frontmatter.
- * @param description - Optional description; emitted only when non-empty.
- * @param tags        - Tags copied from the active artifact's frontmatter.
- * @param entries     - Ordered `[name, value]` pairs to embed in the `vars` fence.
- * @returns Full file content as a single UTF-8 string.
- *
- * @example
- * buildVarSetFileContent('Local Dev', '', ['api'], [['VK-host', 'localhost']]);
- */
-function buildVarSetFileContent(
-    title:       string,
-    description: string,
-    tags:        string[],
-    entries:     [string, string][],
-): string {
-    const lines: string[] = ['---', 'type: variables', `title: ${title}`];
-    if (description.length > 0) { lines.push(`description: ${description}`); }
-    if (tags.length > 0)        { lines.push(`tags: [${tags.join(', ')}]`); }
-    lines.push('---', '', '```vks');
-    for (const [name, value] of entries) { lines.push(`${name}=${value}`); }
-    lines.push('```', '');
-    return lines.join('\n');
-}
-
-/**
- * Slugifies a title into a safe file-name stem: lowercase letters/digits with
- * single hyphens between runs, no leading/trailing hyphen.
- *
- * @param title - Raw user-typed title.
- * @returns A file-system safe slug (always at least one character).
- *
- * @example
- * slugify('Local Development!') // → 'local-development'
- */
-function slugify(title: string): string {
-    const slug = title.toLowerCase().replaceAll(/[^a-z0-9]+/g, '-').replaceAll(/(^-|-$)/g, '');
-    return slug.length > 0 ? slug : 'untitled-variable-set';
+    const vaultRoot = getVaultRootUri();
+    if (!vaultRoot) { return null; }
+    return vscode.Uri.joinPath(vaultRoot, getEntry('variables').dir);
 }
 
 // ── ParsedVar export — helps consumers avoid an extra import ─────────────────
