@@ -157,3 +157,24 @@ export function getAllTypes(): ArtifactType[] {
 export function getCreateFormTypes(): ArtifactType[] {
     return ARTIFACTS.filter(e => e.createForm === true).map(e => e.type);
 }
+
+/**
+ * Resolves the artifact type that owns a vault directory name.
+ *
+ * The directory is the type declaration for files that carry no frontmatter —
+ * a real vault `Commands/` file usually starts straight at `## heading`, and
+ * the user already declared its kind by filing it there. `ARTIFACTS` treats the
+ * directory as authoritative for menus, context keys and command registration;
+ * this makes parsing agree with them.
+ *
+ * @param dirName - Bare directory name as it appears in the vault (e.g. `'Commands'`). Case-insensitive.
+ * @returns The owning `ArtifactType`, or `undefined` when no entry claims that directory.
+ *
+ * @example
+ * getTypeForDir('Commands'); // → 'command'
+ * getTypeForDir('Whatever'); // → undefined
+ */
+export function getTypeForDir(dirName: string): ArtifactType | undefined {
+    const target = dirName.toLowerCase();
+    return ARTIFACTS.find(a => a.dir.toLowerCase() === target)?.type;
+}

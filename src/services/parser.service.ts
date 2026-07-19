@@ -1,6 +1,6 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { getAllTypes } from './artifact-type-config.service.js';
+import { getAllTypes, getTypeForDir } from './artifact-type-config.service.js';
 import type { ArtifactType, ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar } from '../types/parsed-artifact.types.js';
 
 // Accepted `type` values — any unrecognised value keeps the 'snippet' fallback.
@@ -54,8 +54,8 @@ export const VK_TOKEN_RE = /<VK-([A-Za-z]\w*)>/g;
  * @example
  * parseFrontmatter('---\ntype: template\ntitle: React Component\nlanguage: tsx\n---\n')
  */
-function parseFrontmatter(content: string): ParsedFrontmatter {
-    const result: ParsedFrontmatter = { type: 'snippet' };
+function parseFrontmatter(content: string, defaultType: ArtifactType = 'snippet'): ParsedFrontmatter {
+    const result: ParsedFrontmatter = { type: defaultType };
     const match = FRONTMATTER_BLOCK_RE.exec(content);
     if (!match) { return result; }
 
@@ -367,7 +367,11 @@ function mergeVarDefaults(detected: ParsedVar[], defaults: ParsedVar[]): ParsedV
  * parseFromContent(content, uri.fsPath, rootUri.fsPath);
  */
 export function parseFromContent(content: string, filePath: string, artifactRootDir: string): ParsedArtifactFile {
-    const frontmatter = parseFrontmatter(content);
+    // A file with no `type:` is typed by the directory it was filed in — vault
+    // files routinely carry no frontmatter at all, and without this a
+    // `Commands/` file parsed as 'snippet' and inserted at the cursor instead
+    // of being sent to the terminal.
+    const frontmatter = parseFrontmatter(content, getTypeForDir(path.basename(artifactRootDir)));
     const { code, fenceLang } = parseCodeBlock(content);
     if (!frontmatter.language && fenceLang) { frontmatter.language = fenceLang; }
     return {
