@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { applyVarSet } from '../../../services/varset.service.js';
+import { applyVarSet, buildVarSetModel } from '../../../services/varset.service.js';
+import { serializeArtifact } from '../../../services/artifact-serializer.service.js';
 import { slugify } from '../../../services/filename.service.js';
 import { getEntry } from '../../../services/artifact-type-config.service.js';
 import { getVaultRootUri } from '../../../services/config.service.js';
@@ -164,7 +165,7 @@ export class VarSetController {
         if (description === undefined) { return; }
 
         const tags    = artifact.frontmatter.tags ?? [];
-        const content = buildVarSetFileContent(title.trim(), description.trim(), tags, nonEmpty);
+        const content = serializeArtifact(buildVarSetModel(title.trim(), description.trim(), tags, nonEmpty));
         // Empty slug (a title of only punctuation) would write a bare `.md`.
         const slug    = slugify(title) || 'untitled-variable-set';
         const fileUri = vscode.Uri.joinPath(variablesDirUri, `${slug}.md`);
@@ -193,33 +194,6 @@ function getVariablesDirUri(): vscode.Uri | null {
     const vaultRoot = getVaultRootUri();
     if (!vaultRoot) { return null; }
     return vscode.Uri.joinPath(vaultRoot, getEntry('variables').dir);
-}
-
-/**
- * Builds the `.md` file body for a saved variable set.
- *
- * @param title       - Display title — written verbatim into the frontmatter.
- * @param description - Optional description; emitted only when non-empty.
- * @param tags        - Tags copied from the active artifact's frontmatter.
- * @param entries     - Ordered `[name, value]` pairs to embed in the `vars` fence.
- * @returns Full file content as a single UTF-8 string.
- *
- * @example
- * buildVarSetFileContent('Local Dev', '', ['api'], [['VK-host', 'localhost']]);
- */
-function buildVarSetFileContent(
-    title:       string,
-    description: string,
-    tags:        string[],
-    entries:     [string, string][],
-): string {
-    const lines: string[] = ['---', 'type: variables', `title: ${title}`];
-    if (description.length > 0) { lines.push(`description: ${description}`); }
-    if (tags.length > 0)        { lines.push(`tags: [${tags.join(', ')}]`); }
-    lines.push('---', '', '```vks');
-    for (const [name, value] of entries) { lines.push(`${name}=${value}`); }
-    lines.push('```', '');
-    return lines.join('\n');
 }
 
 // ── ParsedVar export — helps consumers avoid an extra import ─────────────────

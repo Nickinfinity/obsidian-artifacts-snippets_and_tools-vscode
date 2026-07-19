@@ -1,6 +1,5 @@
 import type { ArtifactFormBlock, ArtifactFormModel } from '../types/artifact-form.types.js';
-import type { ArtifactType } from '../types/parsed-artifact.types.js';
-import type { ParsedVar } from '../types/parsed-artifact.types.js';
+import type { ArtifactType, ParsedVar } from '../types/parsed-artifact.types.js';
 import { getDefaultLanguage, getLanguageMode } from './artifact-type-config.service.js';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -39,6 +38,13 @@ export const FRONTMATTER_KEY_ORDER: readonly string[] = [
  */
 export function serializeArtifact(model: ArtifactFormModel): string {
     const isMultiBlock = model.blocks.length > 1;
+
+    // `variables` files carry no code fence at all — the vks fence IS the content
+    // (ARTIFACT_FILE_FORMAT.md §3). They are also not create-form-enabled, so the
+    // language resolution below would throw on them; this branch must come first.
+    if (model.type === 'variables') {
+        return serializeFrontmatter(model, undefined) + serializeVariablesBody(model, isMultiBlock);
+    }
 
     if (isMultiBlock) {
         return serializeFrontmatter(model, undefined) + serializeMultiBlockBody(model);
@@ -105,6 +111,52 @@ function serializeSingleBlockBody(block: ArtifactFormBlock, lang: string): strin
     return codePart + vksPart;
 }
 
+// ── Variables body ────────────────────────────────────────────────────────────
+
+/**
+ * Builds the body for a `type: variables` file — bare ` ```vks ` fences, no code
+ * fence and no `vars:` label (ARTIFACT_FILE_FORMAT.md §3, §6).
+ *
+ * Unlike `serializeVks`, vars are emitted **unfiltered**: for a variables file
+ * the fence is the payload, so a var with an empty value is a key the user
+ * asked to record, not an omittable annotation.
+ *
+ * @param model        - The variables model to serialize.
+ * @param isMultiBlock - Whether to emit one `## `-headed sub-set per block.
+ * @returns Body string starting with `\n` and ending with `\n`.
+ *
+ * @example
+ * serializeVariablesBody(model, false) // '\n```vks\nVK-host=localhost\n```\n'
+ */
+function serializeVariablesBody(model: ArtifactFormModel, isMultiBlock: boolean): string {
+    if (!isMultiBlock) {
+        return vksFence(model.blocks[0]?.vars ?? []);
+    }
+
+    return model.blocks
+        .map(b => {
+            const descLine = b.description !== '' ? `${b.description}\n` : '';
+            return `\n## ${b.heading}\n${descLine}${vksFence(b.vars)}`;
+        })
+        .join('');
+}
+
+/**
+ * Emits a bare ` ```vks ` fence for the given vars, values verbatim.
+ *
+ * @param vars - Vars to write as `name=value` lines.
+ * @returns Fence string starting with `\n`, or `''` when there are no vars.
+ *
+ * @example
+ * vksFence([{ name: 'VK-host', defaultValue: 'localhost' }])
+ * // '\n```vks\nVK-host=localhost\n```\n'
+ */
+function vksFence(vars: ParsedVar[]): string {
+    if (vars.length === 0) { return ''; }
+    const body = vars.map(v => `${v.name}=${v.defaultValue}`).join('\n');
+    return `\n\`\`\`vks\n${body}\n\`\`\`\n`;
+}
+
 // ── Multi-block body ──────────────────────────────────────────────────────────
 
 /**
@@ -159,10 +211,8 @@ function serializeBlock(block: ArtifactFormBlock, type: ArtifactType): string {
  * // '\nvars:\n```vks\nVK-x="active"\n```\n'
  */
 function serializeVks(vars: ParsedVar[]): string {
-    const withDefaults = vars.filter(v => v.defaultValue !== '');
-    if (withDefaults.length === 0) { return ''; }
-    const body = withDefaults.map(v => `${v.name}=${v.defaultValue}`).join('\n');
-    return `\nvars:\n\`\`\`vks\n${body}\n\`\`\`\n`;
+    const fence = vksFence(vars.filter(v => v.defaultValue !== ''));
+    return fence === '' ? '' : `\nvars:${fence}`;
 }
 
 // ── Language resolution ───────────────────────────────────────────────────────
@@ -208,7 +258,7 @@ function resolveBlockLanguage(type: ArtifactType, blockLanguage: string): string
  * safeYamlValue('A\r\nB\rC') // 'A B C'
  */
 function safeYamlValue(s: string): string {
-    return s.replaceAll(/\r\n|\r|\n/g, ' ').replaceAll(/  +/g, ' ').trim();
+    return s.replaceAll(/\r\n|\r|\n/g, ' ').replaceAll(/ {2,}/g, ' ').trim();
 }
 
 // ── Private helpers ───────────────────────────────────────────────────────────
