@@ -10,7 +10,15 @@ import type { ArtifactType, ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, 
 const VALID_TYPES = new Set<string>(getAllTypes());
 
 // Frontmatter keys copied verbatim into `ParsedFrontmatter` (string-typed).
-const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);
+/**
+ * Frontmatter keys the parser reads as plain single-line strings.
+ *
+ * Exported so `test/frontmatter-keys.test.ts` can bind this list to the
+ * serializer's `FRONTMATTER_KEY_ORDER`: a key the serializer emits but this set
+ * (plus the specially-handled `type` and `tags`) does not know is silently
+ * dropped on the next read.
+ */
+export const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);
 
 // Shared regex constants — declared once to avoid SonarQube duplicated-literal flags
 // and to keep parsing rules in a single source of truth.
