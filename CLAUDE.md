@@ -307,6 +307,28 @@ variable-set flow — one table, not two):
 
 ---
 
+## Writing a Plan
+
+> **Read [`CREATING_A_PLAN.md`](CREATING_A_PLAN.md) before writing any plan**
+> — a multi-phase feature breakdown, a multi-agent dispatch, or anything that
+> lands under `docs/plans/`. It is the **process** authority; a plan under
+> `docs/plans/<feature-slug>/` is one instance of it.
+>
+> It owns: where plan files live and why they never merge (`git rm -r docs` is
+> the last commit before the PR), the orchestrator/reviewer/worker topology and
+> their verbatim prompt templates, the mandatory skills, the six-field task
+> spec, the gate command, the ledger format, and the plan's definition of done.
+>
+> Two standing rules from it that bind work outside a plan too:
+> **static analysis runs through the *SonarQube for IDE* (SonarLint) VS Code
+> extension** — its `<ide_diagnostics>` arrive on their own after every
+> `Edit`/`Write` and are fixed, not filed; never invoke `sonar-analyze`, the
+> `mcp__sonarqube__*` tools, or the `sonar` CLI (§3.1). And the IDE analyser
+> does **no taint analysis**, so on subprocess, filesystem, and webview
+> surfaces a manual security trace is the only check that exists.
+
+---
+
 ## Variable Sets
 
 Reusable bundles of `<VK-xxx>` defaults applied to any artifact at insert time,
@@ -361,6 +383,7 @@ Messages are in the single protocol table above.
 | `.vscode/tasks.json` | `npm watch` is the default build task (runs automatically on F5) |
 | `.vscode-test.mjs` | Test runner looks for compiled tests at `dist/test/**/*.test.js` |
 | [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) | **Authoritative** artifact `.md` structure spec — parser/serializer contract. Read before touching vault files, fixtures, parser, or any writer. |
+| [`CREATING_A_PLAN.md`](CREATING_A_PLAN.md) | **Authoritative** plan-writing process — agent topology, prompt templates, task spec, gate, ledger. Read before writing any plan or dispatching agents. |
 
 ---
 
