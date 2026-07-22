@@ -9,9 +9,19 @@ pnpm install           # Install deps (no node_modules by default — run after 
 npm run compile        # One-off TypeScript build (outputs to dist/)
 npm run watch          # Watch mode for development (preferred during active development)
 npm run lint           # ESLint check (runs against src/)
-npm run test           # Compile + lint + run all tests
+npm run test           # Compile + lint + run all tests (507 passing)
+rm -rf dist && npm test # REQUIRED after any file delete or rename — see below
 npx tsc --noEmit       # Type-check only — IDE diagnostics can be stale; use this to verify
 ```
+
+**Clean-rebuild rule.** `tsc` does not remove orphaned output, so a deleted
+test's stale compiled artifact keeps running and *inflates* the pass count into
+a phantom green. `rm -rf dist` after any delete or rename.
+
+**macOS socket-path caveat.** `.vscode-test.mjs` pins
+`--user-data-dir=/tmp/oa-vsct` because macOS caps unix socket paths at 103 chars
+and the default under a deep repo path overflows it (`listen EINVAL … .sock`).
+Seeing that does not mean the suite is broken — never fall back to a partial gate.
 
 Press **F5** in VS Code to launch the Extension Development Host.
 
@@ -21,10 +31,14 @@ Press **F5** in VS Code to launch the Extension Development Host.
 
 **Obsidian Artifacts: AI Snippets & Tools** bridges an Obsidian vault and VS Code, letting developers insert vault content — snippets, templates, commands, agent configs, and variables — directly into the editor or terminal without leaving VS Code.
 
-The current feature set:
-
-- **Config page** — a webview panel where the user selects their Obsidian vault root, validates it, and enables or disables artifact directories.
-- **Artifact picker** — a `vscode.QuickPick`-based hierarchical navigator that opens when the user triggers an insert command. The user navigates subfolders, selects a `.md` file. A side-by-side **interactive preview panel** shows the parsed metadata, an editable code area (with line numbers, syntax highlighting, and `<VK-xxx>` token spans), and variable input fields. The user fills in variable values and clicks **Insert** — resolved content is injected at the cursor or sent to the terminal. An **Edit .md** button opens the real vault file in a VS Code editor tab for permanent changes.
+- **Settings panel** — pick and validate the vault root, toggle artifact directories.
+- **Artifact picker** — a `vscode.QuickPick` hierarchical navigator with a
+  side-by-side **interactive preview**: editable code area (line numbers, hljs,
+  `<VK-xxx>` spans) plus variable inputs. **Insert** resolves variables to the
+  cursor or terminal; **Edit .md** opens the real vault file.
+- **Create form** — a webview form that writes new artifacts into the vault.
+- **Variable Sets** — reusable `<VK-xxx>` default bundles, applied with a diff
+  preview or saved from current values.
 
 ---
 
@@ -35,290 +49,304 @@ src/
 ├── extension.ts                      # Entry point — activate() / deactivate()
 ├── commands/
 │   ├── openSettings.command.ts       # Registers obsidian-artifacts.settings
-│   └── insert.command.ts             # Dynamically registers one insert command per artifact
-├── services/
-│   ├── vault.service.ts              # validateObsidianVault(), detectVaultDirs(), createVaultDirectory()
-│   ├── context.service.ts            # setVaultContextKeys(), refreshVaultContext()
-│   ├── parser.service.ts             # parseArtifactFile(), parseFromContent(), parseBlocks(), extractVars(), resolveVars()
-│   ├── render.service.ts             # renderCodeHtml(), renderCodeRowsHtml(), renderLineHtml()
-│   ├── artifact-patcher.service.ts   # patchFrontmatterField(), patchVarDefaults()
-│   ├── preview-mode.service.ts       # PreviewModeController — mode state + section editing
-│   └── temp-document.service.ts      # TempDocument — scratch VS Code editor tab for full edit
+│   ├── insert.command.ts             # One insert command per artifact (loop over ARTIFACTS)
+│   └── create.command.ts             # Create-artifact flow + editor-selection capture
+├── services/                         # Domain logic. Panels/commands stay thin wiring.
+│   ├── artifact-type-config.service.ts   # THE ARTIFACTS reader — getEntry, getAllTypes, getFormConfig…
+│   ├── config.service.ts                 # THE settings reader — CONFIG_SECTION, getVaultPath(RootUri)
+│   ├── artifact-serializer.service.ts    # THE .md emitter — serializeArtifact
+│   ├── parser.service.ts                 # THE .md reader — parse*, extractVars, resolveVars, VK_TOKEN_RE
+│   ├── filename.service.ts               # THE slug — slugify, deriveFileName, validate* guards
+│   ├── artifact-patcher.service.ts       # Surgical in-place .md edits
+│   ├── artifact-writer.service.ts        # Atomic writes + isWithinRoot path-escape guard
+│   ├── vault.service.ts · context.service.ts     # Vault validation/detection; context keys
+│   ├── language-map.service.ts · render.service.ts  # mapLanguageId; renderCode(Rows)Html
+│   ├── varset.service.ts                 # Scanner, score, extractSubSets, applyVarSet, buildVarSetModel
+│   └── preview-mode.service.ts · temp-document.service.ts
 ├── ui/
 │   ├── panels/
-│   │   ├── artifactPicker.panel.ts        # Re-export shim (back-compat for insert.command.ts)
-│   │   ├── artifactPicker/                # Split into 4 parts + shared helpers
-│   │   │   ├── navigator.ts               # Part 1 — ArtifactNavigator + openArtifactPicker (QuickPick)
-│   │   │   ├── navigator.helpers.ts       # Part 1 — buildItem, relFsPath, ArtifactItem, PREVIEW_DEBOUNCE_MS
-│   │   │   ├── codeBlock.ts               # Part 2 — buildCodeBlockHtml + CODE_BLOCK_CLIENT_JS
-│   │   │   ├── codeBlock.helpers.ts       # Part 2 — escForJsTemplate
-│   │   │   ├── preview.ts                 # Part 3 — PreviewPanelController + render funcs + msg routing
-│   │   │   ├── preview.helpers.ts         # Part 3 — escHtml, labelForVar, popupShell, blockAsArtifact, performInsert, POPUP_VIEW_TYPE
-│   │   │   ├── fullEditor.ts              # Part 4 — FullEditController (.md file watcher)
-│   │   │   ├── fullEditor.helpers.ts      # Part 4 — FULL_EDIT_VAR_SYNC_DEBOUNCE_MS
-│   │   │   └── shared.ts                  # `out` OutputChannel singleton
-│   │   ├── REFACTOR_PLAN.md               # Refactor blueprint (split rationale + state ownership)
-│   │   └── settings.panel.ts              # Settings webview panel (UI + message handling)
-│   └── styles.css                         # Shared webview stylesheet — loaded via webview.asWebviewUri()
+│   │   ├── artifactPicker.panel.ts   # Re-export shim (back-compat for insert.command.ts)
+│   │   ├── artifactPicker/           # Parts table under Architecture. navigator · codeBlock ·
+│   │   │                             # preview(.render/.clientJs/.helpers) · blockEditor ·
+│   │   │                             # fullEditor · varSetController · varSetDiff ·
+│   │   │                             # webviewSnippets · shared   (+ *.helpers.ts siblings)
+│   │   ├── artifactForm/             # panel(.helpers) · form.html · form.blocks ·
+│   │   │                             # form.clientJs · form.helpers · shared
+│   │   └── settings.panel.ts · varsetPicker.panel.ts · destFolderPicker.panel.ts
+│   ├── base.css                      # Global reset + bare h1/hr/button — EVERY panel links this
+│   └── settings.css · picker.css · form.css · hljs.css · code-block.css · varset.css
 ├── types/
-│   ├── constants.ts                  # ARTIFACTS — master list of artifact directories
-│   ├── artifact.types.ts             # Artifact, ArtifactContext, ArtifactsArray interfaces
-│   ├── parsed-artifact.types.ts      # ParsedArtifactFile, ParsedBlock, ParsedFrontmatter, ParsedVar, VaultEntry
-│   └── webview-messages.types.ts     # Typed message shapes exchanged between extension and webviews
+│   ├── constants.ts                  # ARTIFACTS · LANG_ALIAS · LANG_FENCE · LANG_EXT
+│   ├── parsed-artifact.types.ts      # ArtifactType union, ParsedArtifactFile, ParsedBlock, ParsedVar
+│   └── artifact.types.ts · artifact-form.types.ts · varset.types.ts · webview-messages.types.ts
 ├── utils/
-│   └── helpers.ts                    # getNonce() for CSP nonces
-├── features/                         # (empty) reserved for future domain features
-└── providers/                        # (empty) reserved for future VS Code providers
-test/
-├── extension.test.ts                 # Mocha test suite
-├── artifact-patcher.test.ts          # Unit tests for artifact-patcher.service
-├── preview-modes.test.ts             # Unit tests for preview-mode.service
-└── temp-document.test.ts             # Unit tests for temp-document.service
+│   ├── helpers.ts                    # getNonce() — CSPRNG-backed
+│   └── html.ts                       # THE escHtml (& < > " ') + styleLinkTags
+├── features/ · providers/            # (empty) reserved
+test/                                 # 507 tests. fixtures/ + snapshots/
+├── snapshots/varset/*.md             # Byte-exact var-set emission goldens — NEVER edit
+├── snapshots/form-html/*.html        # Form-panel HTML snapshots
+└── drift guards: language-consistency · frontmatter-keys · constants · webview-snippets
 ```
 
 ---
 
 ## Architecture
 
-### Entry point
+### Activation flow (`src/extension.ts`)
 
-`src/extension.ts` — `activate()` registers all commands, refreshes VS Code context keys, and auto-opens the Settings panel on first use (when no vault is configured).
-
-### Activation flow
-
-1. `activate()` calls `registerOpenSettingsCommand(context)` and `registerInsertCommands(context)`.
-2. `refreshVaultContext()` sets all VS Code context keys so context menus reflect the current vault state before the first user interaction.
-3. If no vault path is stored in settings, the Settings panel opens automatically.
-4. A `onDidChangeConfiguration` listener watches `obsidianArtifacts.*` for Settings Sync changes and re-creates any enabled directories that are missing.
+`activate()` registers the settings/insert/create commands, then **awaits**
+`refreshVaultContext()` — without the await the context keys land late and the
+first right-click shows no items. If no vault path is stored, the Settings panel
+opens automatically. An `onDidChangeConfiguration` listener watches the section
+(via `CONFIG_SECTION`) and re-creates enabled-but-missing directories on Settings
+Sync — **create only, never auto-delete.**
 
 ### Settings panel (`src/ui/panels/settings.panel.ts`)
 
-`openSettingsPanel(context)` creates a `WebviewPanel` (or reveals an existing one). When the user picks a folder:
-- `validateObsidianVault()` confirms the folder contains a `.obsidian/` directory.
-- `detectVaultDirs()` checks which `ARTIFACTS` directories exist on disk.
-- Missing directories that are marked `default: true` in `ARTIFACTS` are auto-created.
-- The vault path and feature flags are saved to `obsidianArtifacts.*` in VS Code settings (enabling Settings Sync).
+On folder pick: `validateObsidianVault()` (requires `.obsidian/`) →
+`detectVaultDirs()` → auto-create the `default: true` entries → persist path and
+feature flags to `obsidianArtifacts.*` (Settings Sync). It is the **only writer**
+of that config section; it sources the section name from `CONFIG_SECTION`.
+
+### Single sources of truth
+
+Each of these is the **only** place its fact lives. Re-implementing one is the
+regression this list exists to prevent; each is held by a named guard test.
+
+| Fact | Sole owner | Guard |
+|---|---|---|
+| Artifact types | `artifact-type-config.service.ts` — `getEntry` / `getAllTypes` | `constants.test.ts` — parser accepts every `ARTIFACTS` type |
+| Settings section | `config.service.ts` — `CONFIG_SECTION`, `getVaultPath`, `getVaultRootUri` | — (thin `vscode` wrapper; covered via callers) |
+| `.md` emission | `artifact-serializer.service.ts` — `serializeArtifact` | `varset-serialize.test.ts` byte goldens + `frontmatter-keys.test.ts` |
+| `.md` parsing | `parser.service.ts` | `frontmatter-keys.test.ts` binds it to the serializer |
+| HTML escaping | `utils/html.ts` — `escHtml` (all five of `&<>"'`) | `webview-snippets.test.ts` — webview `esc` must match it |
+| Webview `esc`/`lbl` | `artifactPicker/webviewSnippets.ts` — `WEBVIEW_ESC_LBL_JS` | `webview-snippets.test.ts` — defined exactly once per bundle |
+| Slugs | `filename.service.ts` — `slugify` | `filename.service.test.ts` |
+| `<VK-xxx>` regex | `parser.service.ts` — `VK_TOKEN_RE` | `utils-html.test.ts` (shared-instance `lastIndex` reuse) |
+| Language tables | `types/constants.ts` — `LANG_ALIAS` / `LANG_FENCE` / `LANG_EXT` | `language-consistency.test.ts` |
+
+**Never write `ARTIFACTS.find(...)`, a second `escHtml`, or a second slug.**
+Never call `vscode.workspace.getConfiguration('obsidianArtifacts')` outside
+`config.service.ts`.
 
 ### Artifact picker (`src/ui/panels/artifactPicker/`)
 
-The picker is split into **four parts** under `src/ui/panels/artifactPicker/`. The legacy `artifactPicker.panel.ts` is a 1-line re-export shim kept for back-compat with `commands/insert.command.ts`. See [`src/ui/panels/REFACTOR_PLAN.md`](src/ui/panels/REFACTOR_PLAN.md) for the full split rationale and state-ownership table.
+The legacy `artifactPicker.panel.ts` is a 1-line re-export shim kept for
+back-compat with `commands/insert.command.ts`.
 
-| Part | File | Owns |
-|---|---|---|
-| 1 | `navigator.ts` (+ `.helpers.ts`) | `ArtifactNavigator` class, `openArtifactPicker`, parse cache, item builder, hierarchical browsing, accept/active routing |
-| 2 | `codeBlock.ts` (+ `.helpers.ts`) | Editable code-area HTML (`buildCodeBlockHtml`) and the client-side JS (`CODE_BLOCK_CLIENT_JS`) for caret preservation, debounced re-render, paste/Enter intercept |
-| 3 | `preview.ts` (+ `.helpers.ts`) | `PreviewPanelController` — popup webview lifecycle, all render functions (`renderPreviewHtml`, `renderMultiBlockPreviewHtml`, `renderPopupEmptyHtml`, `popupShell`), webview ↔ extension message routing, save-section to `.md` |
-| 4 | `fullEditor.ts` (+ `.helpers.ts`) | `FullEditController` — opens real `.md` in editor tab, watches save (`onDidSaveTextDocument` → `fileUpdated`) and change (`onDidChangeTextDocument`, debounced 500 ms → `updateVars`) |
-| — | `shared.ts` | Single `out` OutputChannel reused across every part |
+| File | Owns |
+|---|---|
+| `navigator.ts` (+ `.helpers.ts`) | `ArtifactNavigator`, `openArtifactPicker`, parse cache, hierarchical browsing, accept/active routing |
+| `codeBlock.ts` | Editable code-area HTML (`buildCodeBlockHtml`) + `CODE_BLOCK_CLIENT_JS` (caret preservation, debounced re-render, paste/Enter intercept). Also carries `WEBVIEW_ESC_LBL_JS`. |
+| `preview.ts` | `PreviewPanelController` — popup lifecycle + message routing. **Controller only.** |
+| `preview.render.ts` | `renderPreviewHtml`, `renderMultiBlockPreviewHtml`, `renderPopupEmptyHtml`, `mergeVarsWithDefaults` |
+| `preview.clientJs.ts` | `PREVIEW_CLIENT_JS` — the popup's webview-side script |
+| `blockEditor.ts` (+ `.helpers.ts`) | `BlockEditController` — one block to a temp file; `normalizeLangId` / `resolveLangId` / `extForLang` |
+| `fullEditor.ts` (+ `.helpers.ts`) | `FullEditController` — real `.md` in an editor tab; save → `fileUpdated`, change (500 ms) → `updateVars` |
+| `varSetController.ts` · `varSetDiff.ts` | Variable-set apply/save routing and diff HTML |
+| `webviewSnippets.ts` | `WEBVIEW_ESC_LBL_JS` — shared client-JS `esc`/`lbl` |
+| `shared.ts` | Single `out` OutputChannel |
 
 `openArtifactPicker(dir, name)` validates the vault and artifact directory, then hands off to `ArtifactNavigator.run()`. There is no WebviewPanel — the entire picker is a `vscode.QuickPick`.
 
-**Code-block plug-in (Part 2 ↔ Part 3 connection):**
-- `preview.ts:renderPreviewHtml` calls `buildCodeBlockHtml(renderCodeRowsHtml(code, lang))` to inject the editable wrapper, then concatenates `CODE_BLOCK_CLIENT_JS` inside its outer IIFE so both scripts share the single `vscode = acquireVsCodeApi()` reference (`acquireVsCodeApi` may only be called once per webview).
-- The code-area client script exposes `window.__codeBlock = { extractCode, renderRows, flushPendingRender, setCode }`. The outer Insert button calls `flushPendingRender()` then reads `extractCode()`; the `fileUpdated` message handler calls `setCode(msg.artifact.code)` to re-render after a `.md` save round-trip.
+**Controller composition — callback bags, never reaching inward.**
+`ArtifactNavigator` constructs `PreviewPanelController` with
+`{ extensionUri, rootFs, targetEditor, setCache, onDispose, closePicker }`;
+that controller owns `FullEditController` with
+`{ rootFs, getCurrentArtifact, setCurrentArtifact, setCache, postMessage }`.
+The full-editor never touches the navigator. `parseCache` lives on the
+navigator; others write through `setCache`. **Imitate this shape** when adding a
+sub-controller.
 
-**Controller composition:**
-- `ArtifactNavigator` constructs a `PreviewPanelController` and passes a callback bag (`{ extensionUri, rootFs, targetEditor, setCache, onDispose, closePicker }`).
-- `PreviewPanelController` owns its `FullEditController` via callback bag (`{ rootFs, getCurrentArtifact, setCurrentArtifact, setCache, postMessage }`). The full-editor never touches the navigator directly.
-- `parseCache` lives on `ArtifactNavigator`; preview/fullEditor write to it via the `setCache` callback.
+**Client-script assembly.** `renderPreviewHtml` injects
+`buildCodeBlockHtml(renderCodeRowsHtml(code, lang))` and concatenates the client
+scripts inside **one** outer IIFE, so they share the single
+`acquireVsCodeApi()` — which may be called **once per webview**.
 
-**`ArtifactNavigator` class (Part 1 — `navigator.ts`):**
-- Maintains a `dirStack` (parent URIs) and `currentDir` for hierarchical navigation.
-- `loadDir(uri)` — reads the directory with `vscode.workspace.fs.readDirectory`, builds items with `$(folder)` / `$(file)` codicons, and updates the QuickPick title to show the breadcrumb path.
-- `loadBlocks(artifact)` — replaces QuickPick items with one entry per `ParsedBlock`; pushes `currentDir` onto `dirStack` so the `..` back item works. Sets `currentArtifact` for preview/insert use.
-- `handleActiveChange(items)` — fires (debounced 120 ms) on `onDidChangeActive`. Block item → `preview.showPreview(blockAsArtifact(...))`. Multi-block file (`blocks.length > 1`) → `preview.showMultiBlockPreview`. Otherwise → `preview.showPreview` (read-only preview while navigating).
-- `handleAccept()` — directory → `loadDir`; multi-block file → `loadBlocks`; block or single-block file → `handoffToPreview(artifact)` which sets `keepPopupOnHide = true`, hides the QuickPick, and calls `preview.showPreview` + `preview.reveal(false)`.
-
-**`PreviewPanelController` (Part 3 — `preview.ts`):**
-- `showPreview(artifact)` — ensures popup panel exists with `enableScripts: true`. Renders interactive HTML via the file-private `renderPreviewHtml` (which embeds `buildCodeBlockHtml` + `CODE_BLOCK_CLIENT_JS`).
-- `showMultiBlockPreview(artifact)` — renders all blocks via `renderCodeHtml`, then `renderMultiBlockPreviewHtml`. Panel created with `enableScripts: true`.
-- `showEmpty()` — replaces panel HTML with the empty-state placeholder.
-- `handleInsert(msg)` — three-tier var resolution (user input → `v.defaultValue` → omit so token survives), then `performInsert`. Tears down the embedded `FullEditController`, disposes the panel, and calls `cb.closePicker()`.
-- `handleFullEdit()` — calls `modeController.enterFullEdit()` then `fullEdit.start(fileUri)`.
-
-**`FullEditController` (Part 4 — `fullEditor.ts`):**
-- `start(fileUri)` — opens the real `.md` beside the popup via `vscode.window.showTextDocument` and subscribes to `onDidSaveTextDocument` (→ re-parse + `fileUpdated` post-message) and `onDidChangeTextDocument` (debounced 500 ms → `updateVars` post-message).
-- `teardown()` — disposes all watchers, cancels the debounce. Always called before `panel.dispose()` to avoid posting into a disposed webview.
-
-**Popup webview interactive mode (`codeBlock.ts` + `preview.ts` scripts):**
-- Code area is a `<div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true">` with per-line `<span class="line-number" contenteditable="false">` spans so line numbers cannot be edited.
-- `CODE_BLOCK_CLIENT_JS` (Part 2) handles all code-area logic locally inside the webview: 150 ms debounced re-render via `renderRows` (no round-trip to extension), caret preservation via text-node offset walking, `Enter` intercept (insert literal `\n`), paste intercept (strip HTML).
-- The outer script (Part 3) wires Insert/Edit/Cancel buttons. Insert reads code from `window.__codeBlock.extractCode()` after calling `flushPendingRender()`.
-- `updateVars` message → outer script rebuilds input fields, preserving already-typed values.
-- `fileUpdated` message → outer script calls `window.__codeBlock.setCode(msg.artifact.code)` to refresh the code area, then rebuilds var inputs.
+**Non-obvious invariants** (per-method detail is in each file's JSDoc — read the
+source rather than a second copy of it here):
+- `onDidChangeActive` is debounced 120 ms; the code area re-renders locally in
+  the webview on a 150 ms debounce with **no** round-trip to the extension.
+- `CODE_BLOCK_CLIENT_JS` exposes
+  `window.__codeBlock = { extractCode, renderRows, flushPendingRender, setCode }`.
+  Insert must call `flushPendingRender()` **before** `extractCode()`, or it reads
+  stale text.
+- `FullEditController.teardown()` **must** run before `panel.dispose()`, or the
+  watchers post into a disposed webview.
 
 **Code preview rendering (`src/services/render.service.ts`):**
-- Two export variants: `renderCodeHtml(code, fenceLang?)` returns a full `<div class="code-block-wrapper">…</div>` block; `renderCodeRowsHtml(code, fenceLang?)` returns only the inner rows (no wrapper). Use `renderCodeRowsHtml` when the caller supplies its own wrapper element (e.g. the editable code area in the preview panel) to avoid double-nesting.
-- Output structure: one `<div class="code-line-row">` per line → `<span class="line-number" contenteditable="false">` + `<span class="code-content">`. Line numbers have `contenteditable="false"` so they cannot be edited when the wrapper is `contenteditable="true"`.
-- Line numbers use `.line-number` (`user-select: none; opacity: 0.5`). Lines use `white-space: pre-wrap; word-break: break-all` — no horizontal scroll.
-- `<VK-xxx>` tokens are wrapped in `<span class="vk-var">` as a post-pass after syntax highlighting. Tokens are protected from hljs splitting via identifier placeholders (`__VK0__`) before the hljs pass, then restored as `vk-var` spans after.
-- `.vk-var` — orange accent (`var(--vscode-charts-orange, #e8a64a)`), bold, subtle background — applied via `src/ui/styles.css`.
-- All preview colors use VS Code CSS variables (`--vscode-editor-font-family`, `--vscode-editorLineNumber-foreground`, `--vscode-charts-orange`, etc.) for automatic light/dark theme compatibility.
+- `renderCodeHtml(code, fenceLang?)` returns a full `.code-block-wrapper` block;
+  `renderCodeRowsHtml` returns only the inner rows — use it when the caller
+  supplies its own wrapper (the editable code area) to avoid double-nesting.
+- One `.code-line-row` per line → `.line-number` (`contenteditable="false"`, so
+  it survives an editable wrapper) + `.code-content` (`pre-wrap`/`break-all`,
+  no horizontal scroll).
+- `<VK-xxx>` tokens are protected from hljs splitting via `__VK0__` placeholders
+  before highlighting, then restored as `.vk-var` spans after.
+- All colours use VS Code CSS variables, so light/dark work automatically.
 
-**Module-level helpers (in `preview.helpers.ts` unless noted):**
-- `blockAsArtifact(block, parent)` — adapts a `ParsedBlock` into a `ParsedArtifactFile` shape for preview/insert; inherits parent frontmatter, overrides `title`, `description`, `language`, `code`, `vars`. Re-exported from `preview.ts` so `navigator.ts` can import it from one place.
-- `performInsert(editor, artifact, vars)` — routes resolved content to the editor cursor, active terminal (`command` type), or clipboard fallback.
-- `escHtml(s)` — escapes `&<>"'` for HTML.
-- `labelForVar(name)` — strips `VK-` prefix, snake_case → spaced, capitalised.
-- `popupShell(body, cssUri, cspSource)` — wraps body in full HTML doc with shared stylesheet link + CSP.
-- `buildItem(uri, isDir, fallback, parsed, rootFs)` (`navigator.helpers.ts`) — builds a richly-populated `ArtifactItem` with `$(file)/$(folder)` codicons, vars/tags detail row.
-- `relFsPath(uri, rootFs)` (`navigator.helpers.ts`) — POSIX relative path computation.
-- `resolveVars(code, vars)` (`services/parser.service.ts`) — substitutes `<VK-xxx>` tokens from the map; unmatched tokens are left unchanged.
+**Module-level helpers (`preview.helpers.ts` unless noted):** `blockAsArtifact`
+(ParsedBlock → ParsedArtifactFile; re-exported from `preview.ts` for one import
+site) · `performInsert` (cursor, terminal for `command` type, clipboard
+fallback) · `labelForVar` (**canonical** — the `WEBVIEW_ESC_LBL_JS` twin is
+test-pinned to it) · `popupShell` (`cssUri` takes one URI or an ordered array) ·
+`buildItem` / `relFsPath` (`navigator.helpers.ts`).
 
-**QuickPick variable display:**
-- Variable names in QuickPick item descriptions strip the `VK-` prefix — e.g. `host` is shown instead of `VK-host`. The full `VK-` prefixed name is still used internally for substitution.
+**Two variable-name conventions — do not conflate:**
+- QuickPick descriptions strip the `VK-` prefix **only**: `VK-api_key` → `api_key`.
+- Preview/form labels apply full `labelForVar`: `VK-api_key` → `Api key`.
 
-**Variable default value fallback:**
-- In `handleInsert`, collected user input is resolved with a three-tier fallback:
-  1. User-typed value (non-empty string) → used as-is.
-  2. `v.defaultValue` (from the `vars:` section or auto-detected) → used if user left the field blank.
-  3. Neither → token is left unchanged in the inserted code (i.e. `<VK-xxx>` is kept literally).
+**Insert-time var resolution is three-tier:** user input → `v.defaultValue` →
+otherwise the `<VK-xxx>` token is left in the output literally.
 
 ### Parser service (`src/services/parser.service.ts`)
 
-Four exports: `parseArtifactFile(filePath, rootDir)` (sync, reads from disk), `parseFromContent(content, filePath, rootDir)` (takes a pre-read string — used by the QuickPick picker's async reads), `extractVars(code)`, and `resolveVars(code, vars)`. The parse functions extract:
-- **Frontmatter** — YAML block between `---` fences (`type`, `title`, `description`, `language`, `tags`, `env`, `target`).
-- **Code block** — content of the ` ```code ` fenced block, trailing whitespace trimmed.
-- **Vars** — either a ` ```vks ` fenced block (for `type: variables`) or an unfenced `vars:` / `vars` section appearing after the code block.
-- **Blocks** — `parseBlocks(content)` (also exported) scans for `## ` headings each followed by a fenced code block. Returns `ParsedBlock[]`; empty array signals a single-block file. `<VK-xxx>` vars in block code are auto-detected via `extractVars`. A section whose **first** fence is ` ```vks ` is a pure variable sub-set. A code fence **followed by** a ` ```vks ` fence in the same section gets default values merged onto its detected tokens via `mergeVarDefaults` (code order preserved; vks-only keys appended; unmatched detected vars keep `defaultValue: ''`). Both parse exports assign the result to `blocks` on `ParsedArtifactFile`.
+Seven exports: `parseArtifactFile` (sync, reads from disk), `parseFromContent`
+(pre-read string — used by the picker's async reads), `parseBlocks`,
+`extractVars`, `resolveVars`, plus two the drift guards bind:
+`VK_TOKEN_RE` (carries `/g` — use only with `matchAll`/`replaceAll`, or reset
+`lastIndex`) and `STRING_FRONTMATTER_KEYS`. The parse functions extract:
+frontmatter (`---` fences), the ` ```code ` block, vars (a ` ```vks ` fence for
+`type: variables`, else an unfenced `vars:` section after the code), and
+`blocks` — `## ` headings each followed by a fence. An empty `blocks` array
+signals a single-block file. Tokens are auto-detected by `extractVars`; a
+section whose **first** fence is ` ```vks ` is a pure sub-set, while a code
+fence *followed by* one gets defaults merged via `mergeVarDefaults` (code order
+kept, vks-only keys appended, unmatched detected vars keep `''`).
+**`ARTIFACT_FILE_FORMAT.md` is the authority on all of this** — read it before
+touching the parser, the serializer, or any fixture.
 
 ### Insert commands (`src/commands/insert.command.ts`)
 
-`registerInsertCommands(context)` loops over `ARTIFACTS` and registers **one VS Code command per artifact** — all handled by the same `openArtifactPicker` function. This is architecturally "one insert command" (one loop, one handler, zero hardcoded names) while satisfying a hard VS Code constraint:
+`registerInsertCommands(context)` loops over `ARTIFACTS` and registers **one
+command per artifact**, all handled by the same `openArtifactPicker`. One loop,
+one handler, zero hardcoded names — the per-artifact command IDs exist only
+because of a hard VS Code constraint:
 
-> VS Code derives a context-menu item's label **exclusively** from the `title` of the matching `contributes.commands` entry in `package.json`. Per-item title overrides in `contributes.menus` are silently ignored.
+> A context-menu item's label comes **exclusively** from the `title` of the
+> matching `contributes.commands` entry. Per-item overrides in
+> `contributes.menus` are silently ignored.
 
-Because of this, showing "Insert Snippets", "Insert Templates", etc. as distinct labels requires distinct command IDs. The pattern is `obsidian-artifacts.insert.<dir.toLowerCase()>` — derived by `artifactCommandId(dir)`, which must match the IDs declared in `package.json`.
+IDs follow `obsidian-artifacts.insert.<dir.toLowerCase()>` via
+`artifactCommandId(dir)` and must match `package.json`.
 
-**Adding a new artifact type:**
-1. Add the entry to `ARTIFACTS` in `src/types/constants.ts` — the handler auto-registers.
-2. Add a matching `contributes.commands` entry in `package.json` with the correct title.
-3. Add `contributes.menus` entries for the relevant context surfaces.
+**Adding a new artifact type** — two source edits, both in `src/types/`:
+1. Add the entry to `ARTIFACTS` in `src/types/constants.ts`.
+2. Add the literal to the `ArtifactType` union in `parsed-artifact.types.ts`.
+   Skipping this is a **compile error**, by design — an unrecognised type must
+   never silently downgrade to `'snippet'`.
 
-**Variables — special context behaviour:**
-`Variables` has `contexts: ['all']`, so `insert.variables` appears in every context surface (editor, terminal, explorer) and carries the label **"See/Edit Variables"** (not "Insert…") to reflect its browse/edit semantics. In `package.json` it uses group `"2_variables@1"` while all other artifacts use `"1_insert@N"` — VS Code renders different groups with a visual separator, so Variables always appears at the bottom of the submenu, or as a standalone item below other artifacts when only it is active.
+Everything else derives: command registration, context keys, parser acceptance
+and the type-config accessors. Then, for menu presentation only:
+3. Add a matching `contributes.commands` entry in `package.json` with the correct title.
+4. Add `contributes.menus` entries for the relevant context surfaces.
 
-**Single entry vs. submenu:**
-Each context surface shows a direct labelled entry for each active artifact when only one is active in that surface (`!obsidian-artifacts.<surface>HasMultiple`), or a collapsed "Obsidian Artifacts" submenu when two or more are active. The `*HasMultiple` context keys are managed by `context.service.ts` and updated whenever the vault configuration changes.
+**Menu presentation.** `Variables` has `contexts: ['all']`, appears everywhere,
+and is labelled **"See/Edit Variables"** (browse/edit, not insert); it sits in
+`package.json` group `"2_variables@1"` while others use `"1_insert@N"`, so VS
+Code's group separator keeps it last. Each surface shows direct entries when one
+artifact is active there, or an "Obsidian Artifacts" submenu when two or more
+are (`*HasMultiple` context keys, maintained by `context.service.ts`).
 
-### Vault directory logic (`src/types/constants.ts` + `src/services/vault.service.ts`)
+### Vault directory logic (`constants.ts` + `vault.service.ts`)
 
-`ARTIFACTS` is the single source of truth for every artifact type. Each entry drives:
-1. Which vault directories are created or detected.
-2. Which VS Code context keys are set (via `context.service.ts`).
-3. Which insert command is registered and where it appears (via `insert.command.ts` + `package.json`).
-
-`default: true` entries (`Snippets`, `AgentsConf`) are auto-created when the vault is first selected. `default: false` entries (`Commands`, `Templates`, `Variables`) are detected but not created automatically.
+Each `ARTIFACTS` entry drives directory creation/detection, context keys, and
+command registration. `default: true` (`Snippets`, `AgentsConf`) are auto-created
+on first vault selection; `default: false` (`Commands`, `Templates`, `Variables`)
+are detected but never auto-created.
 
 ### No runtime dependencies
 
-Only the VS Code API, Node `fs`, and Node `path` are used — no third-party packages.
+Only the VS Code API and Node `fs`/`path` — no third-party packages. Keep it
+that way; the ladder is reuse → stdlib → native before any new dep.
 
 ---
 
 ## Interactive Preview Panel
 
-When the user presses Enter on a file in the QuickPick, the picker closes and the popup webview becomes the primary interaction surface:
+On Enter, the picker closes and the popup webview becomes the interaction
+surface: an editable code area (line numbers `contenteditable="false"`, hljs
+highlighting, `<VK-xxx>` spans), one `<input>` per token pre-filled from
+`vars:`, and **Insert** / **Edit .md** / **Cancel**.
 
-- **Code area** — `<div class="code-block-wrapper editable" contenteditable="true">` with line numbers, syntax highlighting (hljs), and `<VK-xxx>` token spans. The user can type or paste directly. Line number spans are `contenteditable="false"` so they cannot be edited accidentally.
-- **Variable inputs** — one `<input>` per `<VK-xxx>` token, labelled with the hint (no `VK-` prefix). Default values from the `vars:` section pre-fill each input.
-- **Three buttons:**
-  - **Insert** — resolves variables (user input → default → leave token) and calls `performInsert`.
-  - **Edit .md** — opens the raw vault `.md` file in a real VS Code editor tab. Saving that file triggers a `fileUpdated` round-trip that refreshes the preview panel code area.
-  - **Cancel** — closes the popup panel.
+**CSP requirement:** the popup is **always** created with `enableScripts: true`.
+Creating it once with `false` (e.g. after hovering a multi-block file) silently
+blocks every button handler with no error.
 
-**CSP requirement:** The popup panel must be created with `enableScripts: true`. If it was previously created with `enableScripts: false` (e.g. while the user hovered a multi-block file first), all button handlers are silently blocked. The panel is always created with `enableScripts: true` to prevent this.
-
-**Webview ↔ extension message protocol:**
+**Webview ↔ extension message protocol** (both the picker popup and the
+variable-set flow — one table, not two):
 
 | Direction | Command | Payload |
 |---|---|---|
 | webview → ext | `insert` | `{ code, vars: Record<string,string> }` |
-| webview → ext | `fullEdit` | — (opens whole `.md` via `FullEditController`) |
-| webview → ext | `editBlock` | — (opens the previewed block as a temp file via `BlockEditController`) |
-| webview → ext | `cancel` | — |
+| webview → ext | `fullEdit` / `editBlock` / `cancel` | — (whole `.md` · block temp file · close) |
 | webview → ext | `codeChanged` | `{ code: string }` |
+| webview → ext | `pickVarSet` / `saveAsVarSet` | `{ values: Record<string,string> }` |
+| webview → ext | `confirmApply` / `cancelApply` | — |
+| webview → ext | `clearVarSource` | `{ name: string }` |
 | ext → webview | `updateRows` | `{ html: string }` — re-rendered highlighted rows |
 | ext → webview | `updateVars` | `{ vars: ParsedVar[] }` |
-| ext → webview | `fileUpdated` | `{ code, vars }` — after .md save |
+| ext → webview | `fileUpdated` | `{ code, vars }` — after `.md` save |
 | ext → webview | `switchMode` | `{ mode: 'preview' \| 'edit' }` |
+| ext → webview | `showVarSetDiff` | `{ html: string, subSetName: string }` |
+| ext → webview | `varSetApplied` | `{ values, subSetName, varNames }` |
+| ext → webview | `varSetCancelled` | — |
 
 ---
 
 ## Vault File Format & Variable Syntax
 
-> **Authoritative spec moved out of this file.** The full on-disk `.md`
-> structure (single-block, multi-block, `type: variables`), the per-artifact
-> variations table, and the `<VK-xxx>` variable syntax now live in
-> [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) at the repo root.
->
-> **Read that file before** writing any vault `.md`, test fixture, parser
-> change, or serializer/writer — it is the single source of truth that the
-> parser implements and any round-trip (`parse(serialize(x)) ≅ x`) must satisfy.
-> Keep it and `src/services/parser.service.ts` in sync; if they disagree, that
-> is a bug to reconcile, not a judgement call.
+> The on-disk `.md` structure (single-block, multi-block, `type: variables`),
+> the per-artifact variations table and the `<VK-xxx>` syntax live in
+> [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) — **authoritative**, and
+> what the parser implements and `parse(serialize(x)) ≅ x` must satisfy. If it
+> and the code disagree, that is a bug to reconcile, not a judgement call — and
+> the reconciliation extends the shared code to match the spec, never the
+> reverse.
 
 ---
 
 ## Variable Sets
 
-Variable Sets are reusable bundles of `<VK-xxx>` defaults that the user can apply
-to any artifact at insert time. They live alongside snippets/templates/etc. in
-their own vault directory and are consumed by a dedicated picker, scorer, and
-diff-preview flow.
+Reusable bundles of `<VK-xxx>` defaults applied to any artifact at insert time,
+stored in the vault's `Variables/` directory (shape:
+[`ARTIFACT_FILE_FORMAT.md` §6](ARTIFACT_FILE_FORMAT.md)).
 
-**Storage and shape:** see [`ARTIFACT_FILE_FORMAT.md` §6](ARTIFACT_FILE_FORMAT.md) — the on-disk shape of variable-set files is documented there with the rest of the artifact format spec.
+**Scoring:** `score = matchRatio * 0.7 + (tagMatches / totalArtifactTags) * 0.3`.
+Vars match on exact `name` (full `VK-xxx` token, case-sensitive); tags match
+against the artifact's frontmatter `tags`.
 
-**Scoring and picking:**
-
-- Sub-sets are scored against the active artifact by a combined metric:
-  `score = matchRatio * 0.7 + (tagMatches / totalArtifactTags) * 0.3`.
-- Var matching is by exact `name` field (full `VK-xxx` token, case-sensitive).
-- Tag matching counts how many of the artifact's frontmatter `tags` also appear on the variable file's frontmatter.
-
-**Apply flow:**
-
-1. User clicks **[Apply Variable Set]** in the preview panel's variables section.
-2. A QuickPick opens listing every sub-set across every variable file, sorted by score descending.
-3. The user picks a sub-set → the extension calls `applyVarSet(currentValues, subSet.vars)` and posts the resulting `changes[]` to the webview as a diff preview (`renderVarSetDiffHtml`).
-4. The user clicks **Apply** (commits the change set) or **Cancel** (reverts to inputs).
-5. After Apply, filled/overridden inputs gain a `from: <setName>` badge. Manually editing such an input clears its badge.
-
-**Stacking:**
-
-- Applying multiple sets in sequence stacks them: overlapping vars are overridden by the latest set; non-overlapping vars from earlier sets persist.
+**Apply flow:** **[Apply Variable Set]** → QuickPick of every sub-set across
+every variable file, score-sorted → `applyVarSet(currentValues, subSet.vars)`
+posts `changes[]` as a diff preview (`renderVarSetDiffHtml`) → **Apply** commits
+or **Cancel** reverts. Applied inputs gain a `from: <setName>` badge; editing an
+input clears it. Sets **stack** — later sets override overlapping vars, earlier
+non-overlapping ones persist.
 
 **Save-as flow:**
 
 - The variables section also exposes **[Save as Variable Set]**, visible only when at least one input has a non-empty value.
-- On click the extension prompts for title and (optional) description, then writes a new `Variables/<slug>.md` file. The slug is the lowercase-hyphenated form of the title; tags are copied from the active artifact.
+- On click the extension prompts for title and (optional) description, then
+  builds a model with `buildVarSetModel` (`varset.service.ts`) and emits it
+  through **`serializeArtifact`** — there is no bespoke var-set file builder.
+  The slug comes from `filename.service.slugify`; tags are copied from the
+  active artifact. Byte output is locked by `test/snapshots/varset/*.md`.
 - The shared `VarSetScanner` cache is invalidated after the write so the next pick run sees the new file.
 
-**Source tracking:**
+**Source tracking:** `PreviewModeController.varSources` holds
+`varName → setName` so the badge survives extension-side re-renders; the webview
+posts `clearVarSource` when the user edits an input.
 
-- `PreviewModeController.varSources` holds `varName → setName` mappings so the `from: <setName>` badge persists across extension-side re-renders within an artifact session.
-- The webview clears its badge (and posts `clearVarSource`) when the user manually edits an input.
+**Module map:** `services/varset.service.ts` (`VarSetScanner` cached recursive
+scan, `scoreVarSet`, `extractSubSets`, `applyVarSet`, `buildVarSetModel` — pure
+parts unit-tested in `test/varset-*.test.ts`) · `panels/varsetPicker.panel.ts`
+(`pickVarSet`, `getVarSetScanner` for cache invalidation) ·
+`artifactPicker/varSetDiff.ts` (`renderVarSetDiffHtml`) ·
+`artifactPicker/varSetController.ts` (composed by `PreviewPanelController`) ·
+`types/varset.types.ts`.
 
-**Module map:**
-
-- Service layer — `src/services/varset.service.ts` — `VarSetScanner` (cached recursive scan), `scoreVarSet`, `extractSubSets`, `applyVarSet`. Pure functions are unit-tested in `test/varset-*.test.ts`.
-- Picker — `src/ui/panels/varsetPicker.panel.ts` — exposes `pickVarSet(artifactVars, artifactTags, variablesDirUri, extensionUri)` plus `getVarSetScanner()` for cache invalidation from outside.
-- Diff renderer — `src/ui/panels/artifactPicker/varSetDiff.ts` — `renderVarSetDiffHtml(changes, subSetName)`.
-- Controller — `src/ui/panels/artifactPicker/varSetController.ts` — `VarSetController` class composed by `PreviewPanelController`; routes `pickVarSet` / `confirmApply` / `cancelApply` / `saveAsVarSet` messages.
-- Types — `src/types/varset.types.ts` — `VarSetMatch`, `VarSubSet`, `ApplyChange`, `ApplyResult`.
-
-**Webview ↔ extension messages added:**
-
-| Direction | Command | Payload |
-|---|---|---|
-| webview → ext | `pickVarSet` | `{ values: Record<string,string> }` |
-| webview → ext | `confirmApply` | — |
-| webview → ext | `cancelApply` | — |
-| webview → ext | `saveAsVarSet` | `{ values: Record<string,string> }` |
-| webview → ext | `clearVarSource` | `{ name: string }` |
-| ext → webview | `showVarSetDiff` | `{ html: string, subSetName: string }` |
-| ext → webview | `varSetApplied` | `{ values, subSetName, varNames }` |
-| ext → webview | `varSetCancelled` | — |
+Messages are in the single protocol table above.
 
 ---
 
@@ -340,7 +368,7 @@ diff-preview flow.
 
 - `activationEvents: []` in `package.json` — the extension activates on every window open. Narrow this to specific command events once commands stabilise.
 - Compiled output goes to `dist/` and is **gitignored**. Run `npm run compile` after cloning.
-- `media/` ships in the packaged extension. `src/`, `test/`, and `dist/test/` are excluded via `.vscodeignore`.
+- `media/` ships in the packaged extension. `src/`, `test/`, and `dist/test/` are excluded via `.vscodeignore` — **except `!src/ui/*.css`**, which must stay a glob. The webviews load stylesheets from source, so a named exception silently ships a CSS-less extension when a sheet is added or renamed, and the suite stays green because tests run from source. Verify with `npx vsce ls | grep css`.
 - All imports use explicit `.js` extensions (e.g. `'./helpers.js'`) — required by `Node16` module resolution even for `.ts` source files.
 - Webview `localResourceRoots` is restricted to `extensionUri/src/ui` — all webview assets must live in `src/ui/`.
 
@@ -350,27 +378,59 @@ diff-preview flow.
 
 ### ⚠️ File complexity limits (READ FIRST)
 
-**Never grow a single file into a god-object.** Before adding code to an existing file, check whether the new logic belongs in a sibling file instead. The cost of one extra import line is trivial; the cost of a 1000-line file is paid every time anyone reads it.
+**Never grow a file into a god-object.** One extra import line is cheap; a
+1000-line file is paid for on every read.
+- A `.ts` file stays under **~400 lines**. Plan a split at ~500. **Past 700, split before adding.**
+- A function stays under **~50 lines** (ESLint caps cognitive complexity at 15, `S3776`).
+- A class owns **one concern** — if you need a `// ── Section X ──` banner to
+  navigate inside it, that section wants its own file.
 
-**Hard rules:**
-- A single `.ts` file SHOULD stay under **~400 lines**. At ~500 lines, plan a split. **Past 700 lines, split before adding more.**
-- A single function SHOULD stay under **~50 lines**. ESLint enforces cognitive-complexity ≤ 15 (rule `S3776`); when you approach it, extract sub-methods.
-- A single class SHOULD own **one concern**. If you find yourself writing a `// ── Section X ──` comment block to navigate inside a class, that section probably wants to be its own file or controller.
+**Splitting pattern:** a domain feature gets a folder, not a file — one `*.ts`
+per concern, a sibling `*.helpers.ts` for its pure functions, and a `shared.ts`
+for cross-concern singletons.
 
-**Splitting pattern:** every domain feature gets a folder, not a file. Inside the folder:
-- One `*.ts` per **concern** (one class / one orchestrator / one HTML renderer / one watcher).
-- One sibling `*.helpers.ts` per concern for **pure functions, escapers, adapters, constants** that the main file uses but does not own state for.
-- A `shared.ts` (or similar) for cross-concern singletons (output channels, view-type ids, etc.).
+**Worked examples.** The picker was one 1182-line `artifactPicker.panel.ts`; it
+was split by concern into the folder above, controllers composing via callback
+bags. Later `preview.ts` hit 595 lines and was cut on the seam `artifactForm/`
+already used — **controller** (`preview.ts`) · **renderers**
+(`preview.render.ts`) · **webview script constant** (`preview.clientJs.ts`) ·
+**pure helpers** (`preview.helpers.ts`) — landing at 300 with no behaviour
+change. Use that seam for a panel file before inventing another.
 
-**Worked example:** the artifact picker started as a single 1182-line `artifactPicker.panel.ts` mixing QuickPick navigation, code-area rendering, preview chrome, and full-editor watching. It was split into four parts (`navigator`, `codeBlock`, `preview`, `fullEditor`) under `src/ui/panels/artifactPicker/`, each with a sibling `*.helpers.ts`. Controllers compose via callback bags — no part reaches into another's internals. See [`src/ui/panels/REFACTOR_PLAN.md`](src/ui/panels/REFACTOR_PLAN.md) for the move-order template to apply when splitting other large files.
+**Reaching for a file that is already large?** Different concern → new sibling
+file. Stateless/pure → its `*.helpers.ts`. Service/cross-cutting →
+`src/services/`, never the panel. Only if all three are "no" with a reason does
+it go in the existing file. Notice a file crossed 400 lines while finishing a
+feature → propose the split in that PR, not later.
 
-**Decision flow when you reach for a file that is already large:**
-1. Does the new code belong to the **same concern** as the existing file? If no → new sibling file.
-2. Is the new code **stateless / pure**? If yes → put it in the matching `*.helpers.ts` (create one if absent).
-3. Is it a **service / cross-cutting**? If yes → `src/services/`, not the panel/command file.
-4. Only if 1-3 are all "no"-with-good-reason: add it to the existing file.
+### Invariants (each cost a real bug here)
 
-**Refactor proactively, not reactively.** When you finish a feature and notice the file crossed 400 lines, propose a split in the same PR rather than letting debt accumulate.
+**An invariant stated in a comment is not an invariant.** Two comments here
+asserted contracts that had *already* broken: `artifact-type-config.service.ts`
+claimed nothing else traversed `ARTIFACTS` (six sites did), and `constants.ts`
+said "keep the two directions consistent" about language tables that had drifted
+— with the effect that **no Objective-C fence worked at all**. → Every
+cross-file invariant gets a **test**, and the comment names it.
+
+**Any list enumerating a domain set is derived, or drift-guarded.**
+`VALID_TYPES` was a hand-copy of the `ARTIFACTS` types; a missing entry silently
+downgraded to `'snippet'` — wrong behaviour, no error.
+
+**A guard test that cannot fail is decoration.** Prove each new guard by
+reintroducing the exact bug, watching it go red, then restoring. This caught a
+guard here that passed against the very drift it was written for.
+
+**"Duplicate" is a claim about behaviour, not shape.** Diff the bodies before
+collapsing: the webview `esc` "copies" escaped 5, 4, 3 and **0** characters, and
+the one that escaped nothing was writing unescaped user values into HTML
+attributes.
+
+**Webview client JS cannot import — so it gets one shared exported snippet
+string, never a copy-paste** (`WEBVIEW_ESC_LBL_JS`, carried by
+`CODE_BLOCK_CLIENT_JS` so consumers inherit it exactly once).
+
+**Data crossing a webview message is untrusted.** Keep its guard (`panel.ts`'s
+`getEntry` try/catch) and escape everything interpolated into webview HTML.
 
 ### Comments
 - Every function and interface must have a JSDoc block that includes: a concise description, `@param` tags, a `@returns` tag, and at least one `@example`.
@@ -378,11 +438,10 @@ diff-preview flow.
 - Comments should explain **why**, not **what** — well-named identifiers already describe what the code does.
 
 ### File organisation
-- Follow the folder structure defined above.
-- Functions and classes belong in a `services/` or `utils/` file, not in command or panel files.
-- Constants go in `src/types/constants.ts`.
-- Types and interfaces go in `src/types/`.
-- Webview panel logic (HTML generation + message handling) belongs in `src/ui/panels/`.
+Domain logic in `services/`, shared pure helpers in `utils/`, constants in
+`types/constants.ts`, types in `types/` (**no `vscode` imports there** — adapt at
+the edges), webview HTML + message handling in `ui/panels/`. Commands and panels
+stay thin wiring.
 
 ### ESLint gotchas
 - Use `RegExp.exec(str)` not `str.match(re)` — rule `S6594`.
