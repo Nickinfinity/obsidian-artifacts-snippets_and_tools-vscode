@@ -12,10 +12,10 @@ import { getDefaultLanguage, getLanguageMode } from './artifact-type-config.serv
  * `target`) sit at the end so future additions append cleanly.
  *
  * @example
- * FRONTMATTER_KEY_ORDER // ['type','title','description','language','tags','env','target']
+ * FRONTMATTER_KEY_ORDER // ['type','title','description','language','extension','tags','env','target']
  */
 export const FRONTMATTER_KEY_ORDER: readonly string[] = [
-    'type', 'title', 'description', 'language', 'tags', 'env', 'target',
+    'type', 'title', 'description', 'language', 'extension', 'tags', 'env', 'target',
 ];
 
 // ── Public export ─────────────────────────────────────────────────────────────
@@ -79,6 +79,13 @@ function serializeFrontmatter(model: ArtifactFormModel, language: string | undef
 
     // language — single-block only, omitted for plain text and multi-block
     if (language !== undefined && language !== '') { lines.push(`language: ${language}`); }
+
+    // extension — template-only; emitted verbatim when supplied. Single-line
+    // enforced like title/description; the write-path validators (T2/T3/T5) own
+    // path-injection rejection, not the serializer.
+    if (model.extension !== undefined && model.extension !== '') {
+        lines.push(`extension: ${safeYamlValue(model.extension)}`);
+    }
 
     // tags — omitted when empty
     if (model.tags.length > 0) {

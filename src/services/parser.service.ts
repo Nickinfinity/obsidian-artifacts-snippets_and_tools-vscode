@@ -18,7 +18,7 @@ const VALID_TYPES = new Set<string>(getAllTypes());
  * (plus the specially-handled `type` and `tags`) does not know is silently
  * dropped on the next read.
  */
-export const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target']);
+export const STRING_FRONTMATTER_KEYS = new Set<string>(['title', 'description', 'language', 'env', 'target', 'extension']);
 
 // Shared regex constants — declared once to avoid SonarQube duplicated-literal flags
 // and to keep parsing rules in a single source of truth.

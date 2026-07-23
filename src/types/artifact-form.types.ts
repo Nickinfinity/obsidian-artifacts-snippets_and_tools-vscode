@@ -57,6 +57,12 @@ export interface ArtifactFormModel {
     description: string;
     /** Tag list — emitted as `tags: [a, b]`; omitted when empty. */
     tags: string[];
+    /**
+     * Output file extension — **`type: template` only**. Emitted as frontmatter
+     * `extension:` when non-empty; overrides the fence language when the written
+     * file's name is resolved (D3). Absent/empty for every other type.
+     */
+    extension?: string;
     /** Content blocks — at least one entry is always required. */
     blocks: ArtifactFormBlock[];
 }
