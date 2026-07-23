@@ -3,6 +3,13 @@
 How a multi-agent feature plan is written and executed in this repository. This file is the
 **process**; a plan under `docs/plans/` is one **instance** of it.
 
+> **Authoring never rolls straight into execution.** Writing a plan and running it are two
+> separate acts. When a plan is freshly created, **stop** — present it and wait. Do **not**
+> dispatch Wave 0, land any code, or run the gate until the user explicitly says to start
+> (e.g. "run it", "go", "execute the plan"). This holds even when the plan is complete and
+> green-lit by its own definition of done; the definition of done gates *readiness to run*,
+> not *permission to run*. The user gives that permission out loud.
+
 > Filename note: requested as `crating_A_PLAN.md`; spelled `CREATING_A_PLAN.md` here to match
 > the other root-level caps docs (`CLAUDE.md`, `ARTIFACT_FILE_FORMAT.md`). Rename if
 > the literal spelling was intended.
@@ -92,10 +99,23 @@ verbatim per dispatch and append the plan's instance parameters.
    fixes, reviewer re-checks. **Maximum 2 rounds per task**; a third failure is `ESCALATE` and
    the orchestrator resolves it itself — fix directly, or revert the slice and re-dispatch
    fresh — recording which in the decisions table.
-4. All tasks `APPROVE` → orchestrator integrates hunks → gate on the integrated tree → commit
-   → ledger (statuses, counts, review rounds) → next wave.
+4. All tasks `APPROVE` → orchestrator integrates hunks → gate on the integrated tree →
+   **commit → push the feature branch** → ledger (statuses, counts, review rounds) → next wave.
 5. Never dispatch a wave whose inputs a still-running wave is producing. A red gate stops all
    dispatch.
+
+**Commit and push policy (every wave):**
+
+- The orchestrator commits **once per wave**, after the integrated gate is green; workers never
+  commit.
+- **The affected ticket id(s) begin the commit subject** — every story/epic key the wave
+  touched, before anything else, then the conventional-commit summary. Example:
+  `VSX-130 VSX-131 feat(templates): Wave 1 — pure domain`. When keys do not exist yet (Jira
+  connector unauthorized, §8), use the `<KEY>` placeholder in the same position and backfill the
+  real keys into the messages once created — never fabricate a key.
+- **Push the feature branch after each wave's commit**, so the remote always reflects the last
+  green wave and review can follow along. A red gate stops the wave before its commit — nothing
+  half-gated is ever pushed.
 
 ### Prompt templates
 
@@ -123,9 +143,11 @@ forbidden-files list, report caps). Skills do **not** auto-load in subagents —
 > the dispatch, and you never merge a security-flagged task on a worker's self-report alone.
 >
 > **PM duties:** the ledger is yours alone — statuses, gate log with test counts, review
-> rounds, Jira keys, deviations the moment they happen. Commit once per wave; workers never
-> commit. Stop and ask the human at every human-gate task. Hold every worker to its Owns
-> list — scope creep is rejected, not merged.
+> rounds, Jira keys, deviations the moment they happen. Commit once per wave — the affected
+> ticket id(s) first in the subject (`<KEY>` placeholder until keys exist, never fabricated) —
+> then **push the feature branch**; workers never commit. Stop and ask the human at every
+> human-gate task, and **never begin executing a freshly authored plan until the user says to
+> start**. Hold every worker to its Owns list — scope creep is rejected, not merged.
 >
 > **Dispatch:** worker = worker template + task block verbatim, model `sonnet`. Review =
 > reviewer template + task block + worker report + diff, model `opus`, one reviewer per wave
@@ -403,6 +425,13 @@ When the Atlassian connector is not authorized, the markdown file **is** the del
 tickets get created in one pass afterwards. Do not block plan authoring on connector auth,
 and never fabricate ticket keys; leave `<KEY>` placeholders and fill them after creation.
 
+**Documentation-only changes need no ticket.** Editing `CLAUDE.md`, `CREATING_A_PLAN.md`,
+`ARTIFACT_FILE_FORMAT.md`, `CHANGELOG.md`, a `README`, a `docs/` file, or any other prose/docs
+file is exempt from the epic/story requirement **and** from the ticket-id commit prefix —
+commit these with a plain `docs(...)` subject and no `<KEY>`. Tickets track feature work (code
+and its tests), not documentation upkeep. A change that touches both code and docs is feature
+work and takes the ticket id; a change that touches only docs does not.
+
 ---
 
 ## 9. Definition of done for a plan
@@ -431,4 +460,9 @@ Before any agent is dispatched, the plan must satisfy:
 - [ ] Any `.md` artifact format change updates `ARTIFACT_FILE_FORMAT.md` **in the
       same change** — the parser wins when doc and parser disagree, so the doc is the bug.
 - [ ] `progress.md` exists with every task at `todo`.
+- [ ] Per-wave commit **and push** is encoded: the orchestrator commits once per wave with the
+      affected ticket id(s) leading the subject (`<KEY>` until keys exist), then pushes the
+      feature branch. Docs-only changes are exempt from the ticket prefix (§8).
+- [ ] The plan is **not executed on creation** — authoring stops and waits for the user's
+      explicit go-ahead (standing rule at the top of this file).
 - [ ] The PR checklist ends with `git rm -r docs`.
