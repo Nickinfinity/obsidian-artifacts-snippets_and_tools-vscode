@@ -81,11 +81,25 @@ suite('ARTIFACTS per-type form config', () => {
         assert.strictEqual(findByType('command')!.form!.multiBlock, true);
     });
 
-    // ── excluded types: createForm !== true ──────────────────────────────────
+    // ── template form config (Templates-as-files) ────────────────────────────
 
-    test('template: createForm !== true (deferred)', () => {
-        assert.notStrictEqual(findByType('template')!.createForm, true);
+    test('template: contexts === ["explorer"] (leaves the editor menu, D4)', () => {
+        assert.deepStrictEqual(findByType('template')!.contexts, ['explorer']);
     });
+
+    test('template: createForm === true', () => {
+        assert.strictEqual(findByType('template')!.createForm, true);
+    });
+
+    test('template: form.language.mode === free', () => {
+        assert.strictEqual(findByType('template')!.form!.language.mode, 'free');
+    });
+
+    test('template: form.multiBlock === false (single-block only, D1)', () => {
+        assert.strictEqual(findByType('template')!.form!.multiBlock, false);
+    });
+
+    // ── excluded types: createForm !== true ──────────────────────────────────
 
     test('agent: createForm !== true (different authoring flow)', () => {
         assert.notStrictEqual(findByType('agent')!.createForm, true);

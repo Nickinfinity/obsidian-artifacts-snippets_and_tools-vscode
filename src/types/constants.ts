@@ -57,7 +57,16 @@ export const ARTIFACTS: ArtifactsArray = [
 		name: 'Templates',
 		dir: 'Templates',
 		default: false,
-		contexts: ['editor', 'explorer'],
+		// Templates write a whole file into the workspace from the Explorer, so they
+		// leave the editor menu (D4). `multiBlock: false` is D1 — a template is one
+		// block; a 2+ block file is a validation error, expressed here in the table.
+		contexts: ['explorer'],
+		createForm: true,
+		form: {
+			language: { mode: 'free', default: '' },
+			label: { singular: 'template' },
+			multiBlock: false,
+		},
 	},
 	{
 		type: 'variables',

@@ -36,6 +36,13 @@ export interface ParsedFrontmatter {
     env?: string;
     /** Destination file for agent configs — used only for `type: agent` files (e.g. `CLAUDE.md`). */
     target?: string;
+    /**
+     * File extension for the written file — **`type: template` only**. Overrides the
+     * fence language when resolving the output filename (D3 precedence:
+     * user-typed → this key → fence language). Accepted with or without the leading
+     * dot; a value carrying a path separator is rejected, never sanitised.
+     */
+    extension?: string;
 }
 
 /**
