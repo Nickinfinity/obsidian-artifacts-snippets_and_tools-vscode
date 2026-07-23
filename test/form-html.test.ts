@@ -160,3 +160,44 @@ suite('buildFormHtml — snapshots', () => {
         snapshot('snippet-multi-block', html);
     });
 });
+
+// ── T7: template create form ──────────────────────────────────────────────────
+
+/**
+ * Templates-as-files (T7): the create form gains an optional, template-only
+ * extension field and, being `multiBlock: false`, drops the add-block button.
+ */
+suite('buildFormHtml — template', () => {
+
+    function templateModel(extension = ''): ArtifactFormModel {
+        return {
+            type:        'template',
+            title:       'React Component',
+            description: '',
+            extension,
+            tags:        [],
+            blocks: [
+                { heading: '', description: '', language: 'typescriptreact', code: 'export const C = () => null;', vars: [] },
+            ],
+        };
+    }
+
+    test('renders a template-only extension input, seeded with the model value', () => {
+        const html = buildFormHtml({ ...ARGS, model: templateModel('.tsx') });
+        assert.ok(html.includes('id="extension"'), 'extension input present for a template');
+        assert.ok(html.includes('value=".tsx"'), 'extension input seeded with the model value');
+    });
+
+    test('drops the add-block button (multiBlock: false)', () => {
+        const html = buildFormHtml({ ...ARGS, model: templateModel() });
+        assert.ok(!html.includes('id="add-block-btn"'), 'no add-block button for a single-block-only type');
+    });
+
+    test('a snippet form has no extension input', () => {
+        const snippet: ArtifactFormModel = {
+            type: 'snippet', title: 'S', description: '', tags: [],
+            blocks: [{ heading: '', description: '', language: 'javascript', code: 'x', vars: [] }],
+        };
+        assert.ok(!buildFormHtml({ ...ARGS, model: snippet }).includes('id="extension"'));
+    });
+});

@@ -1,6 +1,10 @@
 import * as vscode from 'vscode';
-import { parseFromContent } from '../../../services/parser.service.js';
+import { parseFromContent, resolveVars } from '../../../services/parser.service.js';
 import { renderCodeHtml, renderCodeRowsHtml } from '../../../services/render.service.js';
+import { validateTemplateBlocks, resolveTemplateFileName } from '../../../services/template.service.js';
+import { writeTemplateFile } from '../../../services/template-writer.service.js';
+import { resolveDestination } from '../../../services/template-destination.service.js';
+import { validateTargetFileName } from '../../../services/filename.service.js';
 import { patchFrontmatterField, patchVarDefaults, type BlockRef } from '../../../services/artifact-patcher.service.js';
 import { PreviewModeController, type SectionKey } from '../../../services/preview-mode.service.js';
 import { getNonce } from '../../../utils/helpers.js';
@@ -28,6 +32,8 @@ export interface PreviewCallbacks {
     closePicker: () => void;
     /** Extension storage dir for block-edit temp files (`context.storageUri ?? globalStorageUri`). */
     storageUri: vscode.Uri;
+    /** Explorer URI a Template was invoked on (D2); `undefined` for non-template flows. */
+    destUri?: vscode.Uri;
 }
 
 /**
@@ -272,6 +278,15 @@ export class PreviewPanelController {
     private handleInsert(msg: Record<string, unknown>): void {
         const artifact = this.currentArtifact;
         if (!artifact) { return; }
+
+        // Templates write a whole file into the workspace instead of inserting at
+        // the cursor. The webview keeps posting the existing `insert` message; the
+        // branch happens here so preview.clientJs.ts / webview-messages need no edit.
+        if (artifact.frontmatter.type === 'template') {
+            void this.handleCreateFile(msg, artifact);
+            return;
+        }
+
         const code         = this.resolveInsertCode(msg, artifact);
         const resolvedVars = mergeVarsWithDefaults(msg.vars as Record<string, string>, artifact.vars);
 
@@ -280,6 +295,112 @@ export class PreviewPanelController {
         void this.blockEdit.teardown();
         this.dispose();
         this.cb.closePicker();
+    }
+
+    /**
+     * Create File flow for `type: template`: enforce D1, resolve the destination
+     * and filename, substitute variables, write into the workspace, then open the
+     * new file. Any rejection (bad block count, cancelled prompt, containment
+     * failure) stops the flow without writing.
+     */
+    private async handleCreateFile(msg: Record<string, unknown>, artifact: ParsedArtifactFile): Promise<void> {
+        // ── D1: single-block only ─────────────────────────────────────────────
+        const blockCheck = validateTemplateBlocks(artifact);
+        if (!blockCheck.ok) {
+            void vscode.window.showErrorMessage(`Obsidian Artifacts: ${blockCheck.reason}`);
+            return;
+        }
+
+        // ── Destination (D2) + containment root ───────────────────────────────
+        const destDir = await resolveDestination(this.cb.destUri);
+        if (!destDir) { return; }  // no workspace open, or the folder picker was cancelled
+        const workspaceRoot = vscode.workspace.getWorkspaceFolder(destDir)?.uri;
+        if (!workspaceRoot) {
+            void vscode.window.showErrorMessage('Obsidian Artifacts: Destination is not inside an open workspace folder.');
+            return;
+        }
+
+        // ── Default filename (D3) — throws on a hostile frontmatter extension ──
+        let defaultName: string;
+        try {
+            defaultName = resolveTemplateFileName({
+                frontmatterExt: artifact.frontmatter.extension,
+                langId:         artifact.frontmatter.language,
+                fallbackBase:   artifact.frontmatter.title || artifact.fileName,
+            });
+        } catch (err) {
+            void vscode.window.showErrorMessage(`Obsidian Artifacts: ${(err as Error).message}`);
+            return;
+        }
+
+        const fileName = await this.askFileName(defaultName);
+        if (fileName === undefined) { return; }  // cancelled
+
+        // ── Resolve variables into the file content, then write ───────────────
+        const code    = this.resolveInsertCode(msg, artifact);
+        const vars    = mergeVarsWithDefaults(msg.vars as Record<string, string>, artifact.vars);
+        const content = resolveVars(code, vars);
+
+        const finalPath = await this.writeWithCollisionHandling(workspaceRoot, destDir, fileName, content);
+        if (finalPath === undefined) { return; }  // cancelled or errored (message already shown)
+
+        const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(finalPath));
+        await vscode.window.showTextDocument(doc);
+        this.dispose();
+        this.cb.closePicker();
+    }
+
+    /**
+     * Prompts for a target filename, seeded with `defaultValue` and validated
+     * live by `validateTargetFileName` (workspace-target rules, T3).
+     *
+     * @param defaultValue - Prefilled, fully-editable filename (raw title + ext, P5).
+     * @returns The confirmed filename, or `undefined` when the user cancels.
+     */
+    private async askFileName(defaultValue: string): Promise<string | undefined> {
+        return vscode.window.showInputBox({
+            prompt:         'File name for the new file',
+            value:          defaultValue,
+            ignoreFocusOut: true,
+            validateInput:  v => {
+                const r = validateTargetFileName(v);
+                return r.ok ? undefined : r.reason;
+            },
+        });
+    }
+
+    /**
+     * Writes the template file, resolving collisions interactively: on an existing
+     * file the user chooses Overwrite (retry with `force`), Rename (re-prompt), or
+     * Cancel. Containment/error results surface a message and abort.
+     *
+     * @returns The written file's absolute path, or `undefined` on cancel/error.
+     */
+    private async writeWithCollisionHandling(
+        workspaceRoot: vscode.Uri,
+        destDir: vscode.Uri,
+        fileName: string,
+        content: string,
+    ): Promise<string | undefined> {
+        let name  = fileName;
+        let force = false;
+        for (;;) {
+            const result = await writeTemplateFile({ workspaceRoot, destDir, fileName: name, content, force });
+            if (result.kind === 'success') { return result.filePath; }
+            if (result.kind === 'error') {
+                void vscode.window.showErrorMessage(`Obsidian Artifacts: ${result.message}`);
+                return undefined;
+            }
+            // ── collision → ask ────────────────────────────────────────────────
+            const choice = await vscode.window.showWarningMessage(
+                `"${name}" already exists in that folder.`, { modal: true }, 'Overwrite', 'Rename');
+            if (choice === 'Overwrite') { force = true; continue; }
+            if (choice !== 'Rename')    { return undefined; }  // Cancel / dismissed
+            const renamed = await this.askFileName(name);
+            if (renamed === undefined) { return undefined; }
+            name  = renamed;
+            force = false;
+        }
     }
 
     /**

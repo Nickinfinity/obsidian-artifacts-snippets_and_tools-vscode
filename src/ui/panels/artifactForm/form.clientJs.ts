@@ -263,12 +263,19 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     });
   }
 
+  // Template-only extension field — flag the form dirty when it changes.
+  const extInput = document.getElementById('extension');
+  if (extInput) { extInput.addEventListener('input', markDirty); }
+
   // ── Model extraction ─────────────────────────────────────────────────────
   function extractModel() {
     const type      = blocksArea ? (blocksArea.dataset.type || 'snippet') : 'snippet';
     const title     = titleInput ? titleInput.value : '';
     const descEl    = document.getElementById('description');
     const desc      = descEl ? descEl.value : '';
+    // Template-only extension field; absent (null) for every other type → ''.
+    const extEl     = document.getElementById('extension');
+    const extension = extEl ? extEl.value.trim() : '';
     const blockEls  = allCards();
     let blocks;
     if (blockEls.length === 0) {
@@ -297,7 +304,7 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
         };
       });
     }
-    return { type: type, title: title, description: desc, tags: tags.slice(), blocks: blocks };
+    return { type: type, title: title, description: desc, extension: extension, tags: tags.slice(), blocks: blocks };
   }
 
   function extractVarsForBlock(blockIndex) {
