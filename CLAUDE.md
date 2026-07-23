@@ -125,6 +125,17 @@ regression this list exists to prevent; each is held by a named guard test.
 | Slugs | `filename.service.ts` — `slugify` | `filename.service.test.ts` |
 | `<VK-xxx>` regex | `parser.service.ts` — `VK_TOKEN_RE` | `utils-html.test.ts` (shared-instance `lastIndex` reuse) |
 | Language tables | `types/constants.ts` — `LANG_ALIAS` / `LANG_FENCE` / `LANG_EXT` | `language-consistency.test.ts` |
+| Context-menu surfaces | `types/constants.ts` — each `ARTIFACTS` entry's `contexts` | `package-menus.test.ts` — pins `package.json` menus to `ARTIFACTS` |
+
+**Context menus are driven by `constants.ts`, always.** An artifact's
+`contexts` field is the single source for *where* its command shows (editor /
+terminal / explorer / `all`). Everything runtime derives from it — command
+registration, context keys, `*HasMultiple` counts. `package.json`'s
+`contributes.commands` + `contributes.menus` are the one static mirror (VS Code
+reads them before activation, so they cannot derive at runtime); they must
+match `ARTIFACTS`, and `package-menus.test.ts` fails loudly if they drift — a
+new artifact wired in constants but missing from `package.json` shows **no
+menu entry, no error** without it.
 
 **Never write `ARTIFACTS.find(...)`, a second `escHtml`, or a second slug.**
 Never call `vscode.workspace.getConfiguration('obsidianArtifacts')` outside
