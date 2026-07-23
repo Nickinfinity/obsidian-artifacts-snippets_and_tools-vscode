@@ -125,6 +125,17 @@ regression this list exists to prevent; each is held by a named guard test.
 | Slugs | `filename.service.ts` — `slugify` | `filename.service.test.ts` |
 | `<VK-xxx>` regex | `parser.service.ts` — `VK_TOKEN_RE` | `utils-html.test.ts` (shared-instance `lastIndex` reuse) |
 | Language tables | `types/constants.ts` — `LANG_ALIAS` / `LANG_FENCE` / `LANG_EXT` | `language-consistency.test.ts` |
+| Context-menu surfaces | `types/constants.ts` — each `ARTIFACTS` entry's `contexts` | `package-menus.test.ts` — pins `package.json` menus to `ARTIFACTS` |
+
+**Context menus are driven by `constants.ts`, always.** An artifact's
+`contexts` field is the single source for *where* its command shows (editor /
+terminal / explorer / `all`). Everything runtime derives from it — command
+registration, context keys, `*HasMultiple` counts. `package.json`'s
+`contributes.commands` + `contributes.menus` are the one static mirror (VS Code
+reads them before activation, so they cannot derive at runtime); they must
+match `ARTIFACTS`, and `package-menus.test.ts` fails loudly if they drift — a
+new artifact wired in constants but missing from `package.json` shows **no
+menu entry, no error** without it.
 
 **Never write `ARTIFACTS.find(...)`, a second `escHtml`, or a second slug.**
 Never call `vscode.workspace.getConfiguration('obsidianArtifacts')` outside
@@ -307,6 +318,28 @@ variable-set flow — one table, not two):
 
 ---
 
+## Writing a Plan
+
+> **Read [`CREATING_A_PLAN.md`](CREATING_A_PLAN.md) before writing any plan**
+> — a multi-phase feature breakdown, a multi-agent dispatch, or anything that
+> lands under `docs/plans/`. It is the **process** authority; a plan under
+> `docs/plans/<feature-slug>/` is one instance of it.
+>
+> It owns: where plan files live and why they never merge (`git rm -r docs` is
+> the last commit before the PR), the orchestrator/reviewer/worker topology and
+> their verbatim prompt templates, the mandatory skills, the six-field task
+> spec, the gate command, the ledger format, and the plan's definition of done.
+>
+> Two standing rules from it that bind work outside a plan too:
+> **static analysis runs through the *SonarQube for IDE* (SonarLint) VS Code
+> extension** — its `<ide_diagnostics>` arrive on their own after every
+> `Edit`/`Write` and are fixed, not filed; never invoke `sonar-analyze`, the
+> `mcp__sonarqube__*` tools, or the `sonar` CLI (§3.1). And the IDE analyser
+> does **no taint analysis**, so on subprocess, filesystem, and webview
+> surfaces a manual security trace is the only check that exists.
+
+---
+
 ## Variable Sets
 
 Reusable bundles of `<VK-xxx>` defaults applied to any artifact at insert time,
@@ -361,6 +394,7 @@ Messages are in the single protocol table above.
 | `.vscode/tasks.json` | `npm watch` is the default build task (runs automatically on F5) |
 | `.vscode-test.mjs` | Test runner looks for compiled tests at `dist/test/**/*.test.js` |
 | [`ARTIFACT_FILE_FORMAT.md`](ARTIFACT_FILE_FORMAT.md) | **Authoritative** artifact `.md` structure spec — parser/serializer contract. Read before touching vault files, fixtures, parser, or any writer. |
+| [`CREATING_A_PLAN.md`](CREATING_A_PLAN.md) | **Authoritative** plan-writing process — agent topology, prompt templates, task spec, gate, ledger. Read before writing any plan or dispatching agents. |
 
 ---
 

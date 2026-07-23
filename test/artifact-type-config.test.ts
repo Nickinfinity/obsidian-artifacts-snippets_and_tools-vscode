@@ -45,8 +45,11 @@ suite('artifact-type-config.service', () => {
             assert.throws(() => getFormConfig('agent'), /agent/);
         });
 
-        test('template throws (deferred)', () => {
-            assert.throws(() => getFormConfig('template'), /template/);
+        test('template returns its form object (Templates-as-files)', () => {
+            const cfg = getFormConfig('template');
+            assert.strictEqual(cfg.language.mode, 'free');
+            assert.strictEqual(cfg.label.singular, 'template');
+            assert.strictEqual(cfg.multiBlock, false);
         });
 
         test('variables throws (own save-as flow)', () => {
@@ -86,7 +89,7 @@ suite('artifact-type-config.service', () => {
         });
 
         test('throws for non-create-form type', () => {
-            assert.throws(() => getDefaultLanguage('template'));
+            assert.throws(() => getDefaultLanguage('variables'));
         });
     });
 
@@ -129,9 +132,9 @@ suite('artifact-type-config.service', () => {
         // to satisfy code drift. The helper derives the list from
         // ARTIFACTS[*].createForm === true. Adding a new createForm type
         // anywhere must extend the result automatically.
-        test('returns exactly [snippet, command] (order-insensitive)', () => {
+        test('returns exactly [snippet, command, template] (order-insensitive)', () => {
             const sorted = [...getCreateFormTypes()].sort();
-            assert.deepStrictEqual(sorted, ['command', 'snippet']);
+            assert.deepStrictEqual(sorted, ['command', 'snippet', 'template']);
         });
     });
 

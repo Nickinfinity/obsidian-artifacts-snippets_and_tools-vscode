@@ -64,6 +64,11 @@ export function renderPreviewHtml(
     const target   = a.frontmatter.target ? `<span class="pill">target: ${e(a.frontmatter.target)}</span>` : '';
     const tagsHtml = (a.frontmatter.tags ?? []).map(t => `<span class="tag">${e(t)}</span>`).join('');
 
+    // Templates write a whole file (Create File); every other type inserts at the
+    // cursor (Insert). This ternary is the ONLY per-type rendering difference — the
+    // byte-exact golden for a snippet is the tripwire that it did not leak wider.
+    const primaryLabel = a.frontmatter.type === 'template' ? 'Create File' : 'Insert';
+
     const inputsHtml = a.vars.length > 0
         ? a.vars.map(v => {
             const src = varSources[v.name];
@@ -105,7 +110,7 @@ ${styleLinkTags(cssUri)}
     </div>
   </div>
   <div class="actions">
-    <button class="btn btn-insert"    id="insertBtn">Insert</button>
+    <button class="btn btn-insert"    id="insertBtn">${primaryLabel}</button>
     <button class="btn btn-secondary" id="editBlockBtn">Edit Block</button>
     <button class="btn btn-secondary" id="editBtn">Edit .md</button>
     <button class="btn btn-cancel"    id="cancelBtn">Cancel</button>

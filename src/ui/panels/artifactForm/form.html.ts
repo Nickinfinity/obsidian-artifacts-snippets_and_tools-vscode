@@ -147,12 +147,35 @@ function buildFrontmatterSection(model: ArtifactFormModel): string {
   <label class="slabel" for="description">Description</label>
   <textarea id="description" class="form-input form-textarea" rows="2" placeholder="Optional description">${descVal}</textarea>
 </div>
-<div class="form-section">
+${buildExtensionField(model)}<div class="form-section">
   <div class="slabel">Tags</div>
   <div class="tags-row" id="tags-row">
 ${chips}    <input type="text" id="tag-input" class="tag-input" placeholder="Add tag…">
   </div>
 </div>`;
+}
+
+/**
+ * Builds the optional file-extension field — **templates only**. The extension
+ * is a template-specific frontmatter key (it overrides the fence language when
+ * the written file is named, D3), so the input appears for no other type; every
+ * other type gets an empty string here and never posts an `extension`.
+ *
+ * @param model - Form model (its `type` gates the field, `extension` seeds it).
+ * @returns The extension form-section HTML, or `''` for non-template types.
+ *
+ * @example
+ * buildExtensionField({ type: 'template', extension: '.tsx', ... }) // → '<div class="form-section">…'
+ * buildExtensionField({ type: 'snippet', ... })                     // → ''
+ */
+function buildExtensionField(model: ArtifactFormModel): string {
+    if (model.type !== 'template') { return ''; }
+    const extVal = escHtml(model.extension ?? '');
+    return `<div class="form-section">
+  <label class="slabel" for="extension">File extension <span class="muted">(optional)</span></label>
+  <input type="text" id="extension" class="form-input" value="${extVal}" placeholder="e.g. .tsx — overrides the fence language">
+</div>
+`;
 }
 
 /**

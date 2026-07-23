@@ -20,15 +20,19 @@ import { getVaultRootUri } from '../../../services/config.service.js';
  * @param extensionUri - Extension URI used to resolve the shared CSS stylesheet.
  * @param storageUri   - Extension storage dir for block-edit temp files
  *                       (`context.storageUri ?? context.globalStorageUri`).
+ * @param destUri      - The Explorer URI a Template was invoked on (folder or file),
+ *                       forwarded to the Create File flow (D2). `undefined` for every
+ *                       non-template invocation; the picker behaves exactly as before.
  *
  * @example
- * await openArtifactPicker('Snippets', 'Snippets', context.extensionUri, storageUri);
+ * await openArtifactPicker('Templates', 'Templates', context.extensionUri, storageUri, clickedUri);
  */
 export async function openArtifactPicker(
     artifactDir: string,
     artifactName: string,
     extensionUri: vscode.Uri,
     storageUri: vscode.Uri,
+    destUri?: vscode.Uri,
 ): Promise<void> {
     const vaultRoot = getVaultRootUri();
 
@@ -48,7 +52,7 @@ export async function openArtifactPicker(
     }
 
     const targetEditor = vscode.window.activeTextEditor;
-    await new ArtifactNavigator(rootUri, artifactName, targetEditor, extensionUri, storageUri).run();
+    await new ArtifactNavigator(rootUri, artifactName, targetEditor, extensionUri, storageUri, destUri).run();
 }
 
 // ── ArtifactNavigator ─────────────────────────────────────────────────────────
@@ -77,6 +81,7 @@ class ArtifactNavigator {
         targetEditor: vscode.TextEditor | undefined,
         extensionUri: vscode.Uri,
         storageUri: vscode.Uri,
+        destUri?: vscode.Uri,
     ) {
         this.rootUri      = rootUri;
         this.currentDir   = rootUri;
@@ -97,6 +102,7 @@ class ArtifactNavigator {
             onDispose:    () => { /* preview self-cleans; navigator has no extra work */ },
             closePicker:  () => this.qp.hide(),
             storageUri,
+            destUri,
         });
     }
 
@@ -246,11 +252,28 @@ class ArtifactNavigator {
         if (key === this.lastPreviewedUri) { return; }
         this.lastPreviewedUri = key;
 
-        if (artifact.blocks.length > 1) {
+        if (this.isMultiBlockNav(artifact)) {
             this.preview.showMultiBlockPreview(artifact);
             return;
         }
         this.preview.showPreview(artifact);
+    }
+
+    /**
+     * Whether an artifact should be browsed as a multi-block file.
+     *
+     * A template is single-block by contract (D1); a malformed 2+ block template
+     * is deliberately routed to the single preview so the Create File handler
+     * surfaces the D1 error, rather than letting the user drill into its blocks.
+     *
+     * @param artifact - The parsed artifact under consideration.
+     * @returns `true` when it has 2+ blocks and is not a template.
+     *
+     * @example
+     * this.isMultiBlockNav(artifact) ? showMultiBlockPreview(artifact) : showPreview(artifact)
+     */
+    private isMultiBlockNav(artifact: ParsedArtifactFile): boolean {
+        return artifact.blocks.length > 1 && artifact.frontmatter.type !== 'template';
     }
 
     // ── Parsing & cache ───────────────────────────────────────────────────────
@@ -315,7 +338,7 @@ class ArtifactNavigator {
             return;
         }
 
-        if (artifact.blocks.length > 1) {
+        if (this.isMultiBlockNav(artifact)) {
             this.loadBlocks(artifact);
             return;
         }

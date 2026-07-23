@@ -79,9 +79,18 @@ export function registerInsertCommands(context: vscode.ExtensionContext): void {
     for (const artifact of ARTIFACTS) {
         const commandId = artifactCommandId(artifact.dir);
 
-        const disposable = vscode.commands.registerCommand(commandId, () => {
-            void openArtifactPicker(artifact.dir, artifact.name, context.extensionUri, storageUri);
-        });
+        // VS Code passes (uri, uris[]) to an Explorer context-menu command. Forward
+        // the invoked URI so the Template "New File from Template" flow can resolve
+        // its destination (D2); multi-select uses the first entry. Non-template
+        // commands are invoked without a URI and openArtifactPicker only consults
+        // destUri in the template create-file path — their behaviour is unchanged.
+        const disposable = vscode.commands.registerCommand(
+            commandId,
+            (uri?: vscode.Uri, uris?: vscode.Uri[]) => {
+                const destUri = uris?.[0] ?? uri;
+                void openArtifactPicker(artifact.dir, artifact.name, context.extensionUri, storageUri, destUri);
+            },
+        );
 
         context.subscriptions.push(disposable);
     }
