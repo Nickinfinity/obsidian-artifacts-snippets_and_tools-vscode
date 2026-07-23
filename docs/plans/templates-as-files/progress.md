@@ -35,11 +35,11 @@ Statuses: `todo` · `wip` · `done` · `blocked` · `dropped` (with reason).
 | T5 | 2 | self | done | 564 | pass | 0 (self-review) | 🔒 `template-writer.service.ts` — reuses exported `isWithinRoot` + `WriteResult`. Two containment gates pre-I/O; no dir created. §5 trace PASS. +8 tests |
 | T6 | 3 | self | done | 569 | pass | 0 (self-review) | 🔒 `Create File` label + server-side `insert` branch → create-file flow; `destUri` threaded; D1 enforced via template-aware nav routing + `validateTemplateBlocks` in handler. §5 trace PASS (3 gates). +2 tests. preview.ts 424 lines (P12) |
 | T7 | 3 | self | done | 569 | pass | 0 (self-review) | Template extension field (template-only) + client collector. `panel.ts` unchanged (spread+serializer carry it). `multiBlock:false` add-btn hidden by O2. +3 tests (P11) |
-| O4 | 4 | orchestrator | todo | — | — | n/a | `insert.command.ts` arg passthrough |
-| O5 | 4 | orchestrator | todo | — | — | n/a | `package.json` menu retarget |
-| D1 | 4 | worker | todo | — | — | 0 | `ARTIFACT_FILE_FORMAT.md` Templates section |
-| D2 | 4 | worker | todo | — | — | 0 | Fix stale gate in `CREATING_A_PLAN.md` §6 |
-| D3 | 4 | worker | todo | — | — | 0 | CHANGELOG breaking-change entry |
+| O4 | 4 | self | done | 569 | pass | n/a | Handler accepts `(uri?, uris?)` → forwards first URI as `destUri`. Non-template behaviour unchanged. |
+| O5 | 4 | self | done | 569 | pass | n/a | Title → "New File from Template"; removed from `editor/context` + `submenu.editor`; Explorer entries + feature description updated. JSON valid. |
+| D1 | 4 | self | done | 569 | pass | 0 | `ARTIFACT_FILE_FORMAT.md` §5 template row corrected + new §5.1 (single-block D1, `extension` key, D3 precedence, containment). |
+| D2 | 4 | self | done | 569 | pass | 0 | `CREATING_A_PLAN.md` §6 gate → `rm -rf dist && npm test && npx tsc --noEmit`; stale `pnpm test`/mocha claim removed. |
+| D3 | 4 | self | done | 569 | pass | 0 | CHANGELOG Added/Changed — breaking change (Templates leave editor menu) in user terms. |
 
 🔒 = security-critical. Reviewer's manual §5 trace is mandatory; a `SEC:` finding never expires on
 a round cap.
@@ -57,6 +57,7 @@ One row per gate run. `rm -rf dist` before each — stale `dist/` inflates count
 | W1 close | 1 | pass | 550 | T1 +6, T2 +19, T3 +10; tsc clean. Two out-of-Owns test fixes (P9) + model field (P10) |
 | W2 close | 2 | pass | 564 | T4 +6, T5 +8; tsc clean. No out-of-Owns edits. SonarLint IDE diagnostics not emitting this session → gate degraded to ESLint+tsc+manual (§3.1), all green |
 | W3 close | 3 | pass | 569 | T6 +2, T7 +3; tsc clean. Goldens (demo-snippet, form-html) byte-intact. SonarLint began emitting mid-wave (S1854/S1128, all cleared by using the symbols). |
+| W4 close | 4 | pass | 569 | O4/O5 wiring + D1/D2/D3 docs; no test-count change; tsc clean; package.json valid JSON. Awaiting H1+H2 (F5). |
 
 ---
 
@@ -64,8 +65,8 @@ One row per gate run. `rm -rf dist` before each — stale `dist/` inflates count
 
 | Gate | When | Asks | Status |
 |---|---|---|---|
-| H1 | end of W3 | F5 Explorer flow: menu renders, file lands in the right folder, opens | todo |
-| H2 | end of W4 | Breaking change (Templates leave the editor menu) acceptable; CHANGELOG wording | todo |
+| H1 | end of W3 | F5 Explorer flow: menu renders, file lands in the right folder, opens | **pending human** — merged with H2 (P14) |
+| H2 | end of W4 | Breaking change (Templates leave the editor menu) acceptable; CHANGELOG wording | **pending human** — merged with H1 (P14) |
 
 ---
 
@@ -83,6 +84,7 @@ An empty table at the end means the plan survived contact with reality — recor
 | P5 | plan eval | Filename prompt prefills the **raw** title (editable), not slugified | User decision. `validateTargetFileName` still guards illegal chars on confirm. |
 | P6 | plan eval | Entry UX = full preview panel (reuse picker+preview as-is) | User decision. Lighter flows would require building a new InputBox var-collection path — more code, not less. |
 | P7 | W0/O1 | `blockEditor.helpers.ts` **deleted** (not left as an empty shim); its 3 helpers now live in `language-map.service.ts`; the 19 assertions merged into `language-map.test.ts` beside the existing `mapLanguageId` suites. `test/language-consistency.test.ts` (**not** in O1 Owns) had its import repointed to the service — 1 line. | The helpers had 3 importers, one outside O1 Owns. Deleting the dead file + centralising in the service is the shorter, honester diff than a back-compat shim. `language-map.test.ts` already existed (plan said "new" — stale); appended rather than overwrote. |
+| P14 | W3→W4 | H1 (Explorer F5, end of W3) merged with H2 into a single F5 hand-off after W4. | H1 checks "the context menu renders and the file lands where clicked" — but the menu rename (O5) and clicked-folder URI forwarding (O4) are W4 tasks, so at end-of-W3 the Explorer flow is only half-wired (old label; folder-picker fallback instead of clicked folder). Landing O4/O5 first lets the human verify the final flow once. Code stayed gated per wave; only the human verification was deferred one wave. |
 | P11 | W3/T7 | `test/form-html.test.ts` gained a template suite (+3) — not in T7 Owns (which lists `artifact-type-config.test.ts`). | The meaningful TDD anchor for the extension field is a `buildFormHtml` render test; `artifact-type-config.test.ts`'s `getCreateFormTypes includes template` was already satisfied in W0 (P8). Form-html snapshots (forbidden) untouched — `buildExtensionField` returns `''` for non-templates. |
 | P12 | W3/T6 | `preview.ts` is 424 lines — over the 400 soft limit, under the 500 split-line. | The create-file flow (`handleCreateFile`/`askFileName`/`writeWithCollisionHandling`) is cohesive with the controller. Flagged for a follow-up split; PR notes it per CLAUDE.md "propose the split in that PR". |
 | P13 | W3/T6 | D1 enforced in **two** owned spots: `isMultiBlockNav` routes a 2+ block template to the single preview, and `validateTemplateBlocks` in `handleCreateFile` rejects it on Create File. Error surfaced via native `showErrorMessage`, not a webview message. | Without the nav change a 2+ block template drills into blocks and the handler check is dead. A native toast avoids editing the unowned `preview.clientJs.ts` / `webview-messages.types.ts` (P3 rationale). |

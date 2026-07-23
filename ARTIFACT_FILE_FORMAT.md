@@ -213,7 +213,7 @@ DB_URL=mongodb://localhost:27017
 | `type` | Vault dir | `language` field | Code fence | Defaults | Multi-block | Notes |
 |---|---|---|---|---|---|---|
 | `snippet` | `Snippets` | yes (or plain text) | language or empty | ` ```vks ` | yes | Editor insert. |
-| `template` | `Templates` | yes (or plain text) | language or empty | ` ```vks ` | yes | Editor/explorer insert. Future: multi-file. |
+| `template` | `Templates` | yes (or plain text) | language or empty | ` ```vks ` | **no (D1)** | Explorer → **writes a whole file** into the workspace. Single-block only. `extension:` overrides the fence language (see §5.1). |
 | `command` | `Commands` | yes — **locked to `bash`** | `bash` (locked by serializer) | ` ```vks ` | yes | Terminal insert. |
 | `agent` | `AgentsConf` | optional | language or empty | ` ```vks ` | yes | `target:` names the destination file (e.g. `CLAUDE.md`). Future: multi-file folder + marker. |
 | `variables` | `Variables` | n/a | ` ```vks ` only | the block itself | yes (sub-sets) | `env:` labels the environment. Variable Sets live here. |
@@ -236,6 +236,33 @@ Rules a serializer enforces:
   allows zero characters.
 - **`tags`:** emit `tags: [a, b]`; omit the key entirely when there are no tags.
 - **vks fence:** emit only when at least one var has a non-empty default value.
+- **`extension`:** a `type: template`-only frontmatter key. Emitted verbatim
+  (single line enforced) when non-empty, in the key order
+  `type · title · description · language · extension · tags · env · target`.
+  Parsed as a plain string. Absent/empty for every other type.
+
+### 5.1 Templates — whole-file behaviour
+
+A `template` is not a fragment inserted at the cursor; invoking **New File from
+Template** from the Explorer writes the artifact's single code block to disk as a
+real file, with `<VK-xxx>` variables resolved exactly as every other artifact
+resolves them.
+
+- **Single-block only (D1).** A template `.md` with two or more `##` blocks is a
+  validation error surfaced when Create File is pressed — no file is written.
+  The parser stays general; the guard (`validateTemplateBlocks`,
+  `services/template.service.ts`) is template-scoped.
+- **Output filename — extension precedence (D3):** **user-typed → frontmatter
+  `extension:` → fence language.** A typed name that already carries an extension
+  wins whole; otherwise the extension is taken from `extension:` (leading dot
+  optional), and only if that is absent from the fence language (mapped through
+  `language-map.service.ts`). `extension:` and the typed name are path-injection
+  vectors: a value carrying `/`, `\`, `..`, or a NUL is **rejected, never
+  sanitised**.
+- **Destination (D2):** the clicked folder (or a clicked file's parent), or a
+  folder picker rooted at the workspace when invoked from the palette. The write
+  is containment-checked against the workspace folder before any I/O and creates
+  no directory.
 
 ---
 

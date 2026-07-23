@@ -351,18 +351,23 @@ one read of this file the protocol opens with.
 
 ## 6. The gate
 
-Every wave ends with the repo gate. `pnpm test` does not work on this checkout (the path
-pushes the VS Code IPC socket past the macOS 103-char limit), so:
+Every wave ends with the repo gate:
 
 ```bash
-rm -rf dist && pnpm compile && pnpm lint && \
-  node node_modules/.pnpm/mocha@*/node_modules/mocha/bin/mocha.js --ui tdd "dist/test/**/*.test.js"
+rm -rf dist && npm test && npx tsc --noEmit
 ```
 
-`rm -rf dist` is **required**, not hygiene: `tsc` does not delete orphaned `dist/*.js`, so a
-renamed or deleted test keeps running from stale output and inflates the pass count.
+`npm test` runs compile + lint + the full suite. The macOS 103-char unix-socket
+limit no longer bites: `.vscode-test.mjs` pins `--user-data-dir=/tmp/oa-vsct`,
+which keeps the VS Code IPC socket path short. (The old workaround — a direct
+`mocha` invocation because `pnpm test` supposedly could not run — was stale and
+has been removed.)
 
-Also run `npx tsc --noEmit` — IDE diagnostics go stale, this is the truth.
+`rm -rf dist` is **required**, not hygiene: `tsc` does not delete orphaned
+`dist/*.js`, so a renamed or deleted test keeps running from stale output and
+inflates the pass count.
+
+`npx tsc --noEmit` is the type-truth — IDE diagnostics go stale.
 
 `vscode`-coupled code is verified by the **F5 manual pass** only. The plan lists the exact
 click-path per phase; "F5 and check it works" is not a test.
