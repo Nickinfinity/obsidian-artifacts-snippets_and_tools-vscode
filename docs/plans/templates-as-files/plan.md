@@ -205,12 +205,19 @@ Shared-authority edits. Everything downstream depends on these, so they land and
 - **Owns:** `src/services/template.service.ts`, `test/template.service.test.ts`
 - **Reads:** `src/services/language-map.service.ts`, `src/types/parsed-artifact.types.ts`
 - **Depends on:** O1, O3
-- **Test first:** `test/template.service.test.ts` — `resolveTemplateFileName({ typed: 'Button', frontmatterExt: undefined, fenceLang: 'tsx' })` → `'Button.tsx'`. Fails (module absent).
+- **Test first:** `test/template.service.test.ts` — `resolveTemplateFileName({ typed: 'Button', frontmatterExt: undefined, langId: 'tsx' })` → `'Button.tsx'`. Fails (module absent).
 - **Done when:** two pure exports:
-  - `resolveTemplateFileName({ typed, frontmatterExt, fenceLang, fallbackBase })` implementing D3.
+  - `resolveTemplateFileName({ typed, frontmatterExt, langId, fallbackBase })` implementing D3.
     A `typed` value that already carries any extension wins whole. `frontmatterExt` is accepted
-    with or without the leading dot. Neither may contribute `/`, `\`, `..`, or a NUL — those
-    inputs **throw**, they are not sanitised (§5.2).
+    with or without the leading dot. `langId` is the **last** resort — resolved to an extension
+    via `extForLang(normalizeLangId(langId))`. Neither `frontmatterExt` nor `typed` may contribute
+    `/`, `\`, `..`, or a NUL — those inputs **throw**, they are not sanitised (§5.2).
+
+    > **`langId`, not a root `fenceLang`.** A single-block template has no separate `fenceLang`
+    > field: the parser folds the root fence into `frontmatter.language`
+    > ([parser.service.ts:376](../../../src/services/parser.service.ts) — `if (!frontmatter.language && fenceLang) frontmatter.language = fenceLang`).
+    > So the caller passes `artifact.frontmatter.language`; there is nothing else to pass. A task
+    > written against `artifact.fenceLang` silently gets `undefined` and the fence fallback dies.
   - `validateTemplateBlocks(parsed)` → `{ ok: true } | { ok: false; reason: string }`, rejecting
     `blocks.length > 1` with a message naming the count (D1).
 - **Gate:** full gate. **Security-critical** — test table includes `../../etc/passwd`,
@@ -272,37 +279,72 @@ Shared-authority edits. Everything downstream depends on these, so they land and
 
 ### Wave 3 — UI (2 workers in parallel)
 
-#### T6 — Preview panel: template mode
+#### T6 — Template mode: the command→preview destination thread + Create File
 
-- **Owns:** `src/ui/panels/artifactPicker/preview.ts`, `src/ui/panels/artifactPicker/preview.render.ts`, `test/preview-render.test.ts`
-- **Reads:** `src/services/template.service.ts`, `src/services/template-writer.service.ts`, `src/types/webview-messages.types.ts`
-- **Depends on:** T2, T5
+- **Owns:** `src/ui/panels/artifactPicker/navigator.ts`, `src/ui/panels/artifactPicker/preview.ts`, `src/ui/panels/artifactPicker/preview.render.ts`, `test/preview-render.test.ts`
+- **Reads:** `src/services/template.service.ts`, `src/services/template-writer.service.ts`, `src/services/template-destination.service.ts`, `src/services/filename.service.ts`, `src/types/webview-messages.types.ts`
+- **Depends on:** T2, T4, T5
 - **Test first:** `test/preview-render.test.ts` — rendering a `type: 'template'` artifact emits a
   button labelled `Create File`, not `Insert`.
-- **Done when:** for `type: 'template'` the panel (a) labels the primary button `Create File`,
-  (b) posts `createFile` instead of `insert`, (c) renders the D1 validation error in place of the
-  button when `validateTemplateBlocks` fails. The handler prompts for the filename via
-  `vscode.window.showInputBox` prefilled from `deriveFileName(title)` + resolved extension,
-  validates with `validateTargetFileName`, then calls `writeTemplateFile`. On `collision`, prompt
-  Overwrite / Rename / Cancel. On success, open the new file.
+- **Done when:**
+  1. **Destination thread.** A `destUri?: vscode.Uri` parameter is threaded through the picker:
+     `openArtifactPicker` signature → `ArtifactNavigator` constructor → `PreviewCallbacks.destUri`.
+     Nothing else about the picker changes; non-template flows pass `undefined` and behave exactly
+     as today.
+  2. **Button label.** For `type: 'template'`, `renderPreviewHtml` labels the primary button
+     `Create File`; otherwise `Insert`. This is the **only** rendering change.
+  3. **Server-side routing — no new webview message.** The button keeps posting the existing
+     `insert` message; `handleInsert` (in `preview.ts`, owned) branches on
+     `artifact.frontmatter.type === 'template'` **before** it would call `performInsert`, and runs
+     the create-file flow instead. Rationale: `preview.clientJs.ts` (button wiring) and
+     `webview-messages.types.ts` are **not** owned by this task, and a `createFile` message would
+     force edits to both for zero behavioural gain — `performInsert` already branches on type
+     ([preview.helpers.ts:103](../../../src/ui/panels/artifactPicker/preview.helpers.ts)), so the seam exists.
+  4. **Create-file flow.** The handler: `validateTemplateBlocks` (D1 — on failure, post the error
+     and stop, no write); `resolveDestination(cb.destUri)` (T4) → destDir; `resolveTemplateFileName`
+     (T2) → default name; `showInputBox` **prefilled with the raw template title + resolved
+     extension, fully editable** (decision: raw title, user edits — not slugified); validate the
+     result with `validateTargetFileName` (T3); `writeTemplateFile` (T5). On `collision`, prompt
+     Overwrite / Rename / Cancel (Rename → re-open the input box). On success, open the new file.
 - **Gate:** full gate. **F5 click-path:** Explorer → right-click `src/` → *New File from Template*
   → pick a template → fill a var → *Create File* → accept the prefilled name → file appears under
   `src/` and opens.
+- **Regression guard:** `renderPreviewHtml` is the function behind the byte-exact golden
+  `test/fixtures/preview-render-golden/demo-snippet.html` (a **forbidden** file). The label branch
+  must be `type === 'template' ? 'Create File' : 'Insert'` so non-template output stays byte-identical
+  — the golden is the tripwire, and a diff there means the branch leaked into the snippet path.
 - **Security-critical** — every interpolated value into the webview goes through `escHtml`; the
   `.md` `title` reaching the input box is untrusted.
 
+> **Three owned source files, by exception.** The plan's sizing rule is one file plus its test.
+> `navigator.ts`, `preview.ts`, and `preview.render.ts` are owned together here because they are
+> the single inseparable seam of one concern — the destination URI enters at `navigator.ts`, lands
+> in `PreviewCallbacks` (`preview.ts`), and the button that consumes it is drawn in
+> `preview.render.ts`. Splitting the seam across tasks would either strand the thread half-wired or
+> collide two tasks on `preview.ts`. `navigator.ts` has **no other owner in the plan**; without it
+> here, O4 cannot forward the URL to an `openArtifactPicker` whose signature never widened.
+
 #### T7 — Create form accepts Templates
 
-- **Owns:** `src/ui/panels/artifactForm/panel.ts`, `src/ui/panels/artifactForm/form.html.ts`, `test/artifact-type-config.test.ts`
-- **Reads:** `src/services/artifact-type-config.service.ts`, `src/types/constants.ts`
-- **Depends on:** O2
+- **Owns:** `src/ui/panels/artifactForm/panel.ts`, `src/ui/panels/artifactForm/form.html.ts`, `src/ui/panels/artifactForm/form.clientJs.ts`, `src/types/artifact-form.types.ts`, `test/artifact-type-config.test.ts`
+- **Reads:** `src/services/artifact-type-config.service.ts`, `src/services/artifact-serializer.service.ts`, `src/types/constants.ts`
+- **Depends on:** O2, T1
 - **Test first:** `test/artifact-type-config.test.ts` — `getCreateFormTypes()` includes
   `'template'`; fails today.
 - **Done when:** Templates appear in the create-flow type picker, the form honours
-  `multiBlock: false` (no `+ Add additional template` button), and an optional `extension` input is
-  written to frontmatter when non-empty.
+  `multiBlock: false` (no `+ Add additional template` button), and an optional `extension` input
+  reaches frontmatter when non-empty. The `extension` value flows end to end:
+  `ArtifactFormModel.extension?` (type) → the input in `form.html.ts` → collected into the posted
+  `model` in `form.clientJs.ts` (beside `language`, see [form.clientJs.ts:281](../../../src/ui/panels/artifactForm/form.clientJs.ts)) → written by `handleSave` in `panel.ts`.
 - **Gate:** full gate. **F5 click-path:** Command Palette → *Create Artifact* → Template → fill →
   Save → the `.md` lands in `Templates/` with the `extension` key when supplied.
+
+> **Four owned source files, by exception** — same justification class as T6. The `extension`
+> input is one field whose value must be typed, carried through the model, and serialized; the
+> model type (`artifact-form.types.ts`), the markup (`form.html.ts`), the client collector
+> (`form.clientJs.ts`), and the save handler (`panel.ts`) are the inseparable path of that one
+> value. `form.clientJs.ts` builds the `model` object today and would silently drop `extension`
+> if left unowned. Depends on **T1** because the serializer must already emit the key.
 
 ---
 
@@ -311,12 +353,14 @@ Shared-authority edits. Everything downstream depends on these, so they land and
 #### O4 — `insert.command.ts` stops discarding command arguments *(orchestrator)*
 
 - **Owns:** `src/commands/insert.command.ts`
-- **Reads:** `src/services/template-destination.service.ts`, `src/ui/panels/artifactPicker.panel.ts`
-- **Depends on:** T4
+- **Reads:** `src/ui/panels/artifactPicker.panel.ts`
+- **Depends on:** T6
 - **Test first:** none (thin `vscode` wiring). Covered by H1.
 - **Done when:** the registered handler accepts `(uri?: vscode.Uri, uris?: vscode.Uri[])` and
-  forwards them to `openArtifactPicker`. Non-template artifacts ignore the extra arguments —
-  **their behaviour must not change**.
+  forwards the first URI to `openArtifactPicker` as its new `destUri` argument (widened by T6 —
+  this task is unbuildable before T6 lands, hence the dependency). The command passes the URI
+  through untouched; destination resolution is T4's job, called from the preview handler.
+  Non-template artifacts pass no URI and **their behaviour must not change**.
 - **Gate:** full gate.
 
 #### O5 — `package.json` menu retarget *(orchestrator)*
@@ -376,6 +420,13 @@ Shared-authority edits. Everything downstream depends on these, so they land and
 
 Disjointness holds: no file appears in two tasks of the same wave, test files included. No task
 depends on a task in its own wave.
+
+**Wave 3 disjointness (the tightest pair):** T6 owns `artifactPicker/{navigator,preview,preview.render}.ts`;
+T7 owns `artifactForm/{panel,form.html,form.clientJs}.ts` + `types/artifact-form.types.ts`. No
+overlap. Both read services from earlier waves but write only their own files.
+
+**Cross-wave dependency chain** (verified acyclic): O1/O3 → T2 → T6; O3 → T1 → {T6, T7}; T4 → {T5, T6};
+T2/T3/T5 → T6; O2 → T7; T6 → O4; O2 → O5 → D3; T1 → D1. No task depends on a same-wave sibling.
 
 ---
 

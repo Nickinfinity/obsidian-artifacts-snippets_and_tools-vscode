@@ -72,4 +72,9 @@ An empty table at the end means the plan survived contact with reality — recor
 
 | # | Wave | Decision | Rationale |
 |---|---|---|---|
-| — | — | — | — |
+| P1 | plan eval | T6 also owns `navigator.ts` | The destination URI threads `openArtifactPicker` → `ArtifactNavigator` → `PreviewCallbacks`; all three live in `navigator.ts`/`preview.ts`. `navigator.ts` had **no owner** — O4 could not forward a URI to an un-widened signature. |
+| P2 | plan eval | T7 also owns `form.clientJs.ts` + `artifact-form.types.ts` | `form.clientJs.ts` builds the posted `model`; without it the `extension` input is collected nowhere and silently dropped. The model type must carry `extension?`. |
+| P3 | plan eval | Template create uses the existing `insert` message, routed server-side | A new `createFile` message would force edits to `preview.clientJs.ts` + `webview-messages.types.ts` (both unowned) for no behavioural gain — `handleInsert`/`performInsert` already branch on type. |
+| P4 | plan eval | T2 input renamed `fenceLang` → `langId`, sourced from `frontmatter.language` | The parser folds the root fence into `frontmatter.language` (parser.service.ts:376); there is no separate root `fenceLang`. A task coded against `artifact.fenceLang` gets `undefined`. |
+| P5 | plan eval | Filename prompt prefills the **raw** title (editable), not slugified | User decision. `validateTargetFileName` still guards illegal chars on confirm. |
+| P6 | plan eval | Entry UX = full preview panel (reuse picker+preview as-is) | User decision. Lighter flows would require building a new InputBox var-collection path — more code, not less. |
