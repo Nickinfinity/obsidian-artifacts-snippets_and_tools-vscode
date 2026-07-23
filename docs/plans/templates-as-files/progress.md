@@ -31,8 +31,8 @@ Statuses: `todo` · `wip` · `done` · `blocked` · `dropped` (with reason).
 | T1 | 1 | self | done | 550 | pass | 0 (self-review) | `extension` in both key lists; serializer emits it; round-trip holds. +`ArtifactFormModel.extension?` + `artifact-serializer.test.ts` order assertion (P9/P10). +6 tests |
 | T2 | 1 | self | done | 550 | pass | 0 (self-review) | 🔒 `template.service.ts` — D3 precedence + D1 guard. §5 trace PASS (typed/frontmatterExt throw; langId laundered). +19 tests |
 | T3 | 1 | self | done | 550 | pass | 0 (self-review) | 🔒 `validateTargetFileName` = `runCommonChecks` passthrough (allows `.md`, rejects separators/NUL/reserved). §5 trace PASS. +10 tests |
-| T4 | 2 | worker | todo | — | — | 0 | Destination resolution from Explorer URI |
-| T5 | 2 | worker | todo | — | — | 0 | 🔒 `template-writer.service.ts` — workspace write |
+| T4 | 2 | self | done | 564 | pass | 0 (self-review) | `classifyDestination` (pure, +4) + `resolveDestination` wrapper (+2). No-URI picker branch → H1. |
+| T5 | 2 | self | done | 564 | pass | 0 (self-review) | 🔒 `template-writer.service.ts` — reuses exported `isWithinRoot` + `WriteResult`. Two containment gates pre-I/O; no dir created. §5 trace PASS. +8 tests |
 | T6 | 3 | worker | todo | — | — | 0 | 🔒 Preview panel template mode + F5 path |
 | T7 | 3 | worker | todo | — | — | 0 | Create form accepts Templates + F5 path |
 | O4 | 4 | orchestrator | todo | — | — | n/a | `insert.command.ts` arg passthrough |
@@ -55,6 +55,7 @@ One row per gate run. `rm -rf dist` before each — stale `dist/` inflates count
 | pre-flight | — | pass | 512 | Baseline before any task lands; tsc clean |
 | W0 close | 0 | pass | 515 | O1 net 0 (19 assertions relocated), O2 net +3, O3 type-only; tsc clean |
 | W1 close | 1 | pass | 550 | T1 +6, T2 +19, T3 +10; tsc clean. Two out-of-Owns test fixes (P9) + model field (P10) |
+| W2 close | 2 | pass | 564 | T4 +6, T5 +8; tsc clean. No out-of-Owns edits. SonarLint IDE diagnostics not emitting this session → gate degraded to ESLint+tsc+manual (§3.1), all green |
 
 ---
 
