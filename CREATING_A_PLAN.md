@@ -432,6 +432,12 @@ commit these with a plain `docs(...)` subject and no `<KEY>`. Tickets track feat
 and its tests), not documentation upkeep. A change that touches both code and docs is feature
 work and takes the ticket id; a change that touches only docs does not.
 
+**The PR references the tickets.** Every `plan.md` must specify — in its PR checklist — that the
+pull request description lists the affected Jira tickets: the epic and every story the branch
+delivered. This is what links the merged PR back to the tracker after the `docs/` deletion
+removes `jira-tickets.md`. Use the real keys once created; a `<KEY>` placeholder is a blocker to
+merge, not an acceptable final state (the tickets must exist before the PR opens).
+
 ---
 
 ## 9. Definition of done for a plan
@@ -465,4 +471,6 @@ Before any agent is dispatched, the plan must satisfy:
       feature branch. Docs-only changes are exempt from the ticket prefix (§8).
 - [ ] The plan is **not executed on creation** — authoring stops and waits for the user's
       explicit go-ahead (standing rule at the top of this file).
+- [ ] The plan's PR checklist requires the **PR description to list the affected Jira tickets**
+      (the epic and its stories) — see §8.
 - [ ] The PR checklist ends with `git rm -r docs`.
