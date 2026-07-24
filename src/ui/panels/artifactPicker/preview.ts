@@ -1,7 +1,8 @@
 import * as vscode from 'vscode';
 import { parseFromContent, resolveVars } from '../../../services/parser.service.js';
 import { renderCodeHtml, renderCodeRowsHtml } from '../../../services/render.service.js';
-import { validateTemplateBlocks, resolveTemplateFileName } from '../../../services/template.service.js';
+import { validateTemplateBlocks, resolveTemplateFileName, resolveAgentFileName } from '../../../services/template.service.js';
+import { writesWholeFile, getTypeSingular } from '../../../services/artifact-type-config.service.js';
 import { writeTemplateFile } from '../../../services/template-writer.service.js';
 import { resolveDestination } from '../../../services/template-destination.service.js';
 import { validateTargetFileName } from '../../../services/filename.service.js';
@@ -279,10 +280,11 @@ export class PreviewPanelController {
         const artifact = this.currentArtifact;
         if (!artifact) { return; }
 
-        // Templates write a whole file into the workspace instead of inserting at
-        // the cursor. The webview keeps posting the existing `insert` message; the
-        // branch happens here so preview.clientJs.ts / webview-messages need no edit.
-        if (artifact.frontmatter.type === 'template') {
+        // Templates and agent configs write a whole file into the workspace instead
+        // of inserting at the cursor. The webview keeps posting the existing `insert`
+        // message; the branch happens here so preview.clientJs.ts / webview-messages
+        // need no edit. `writesWholeFile` is the single source shared with the label.
+        if (writesWholeFile(artifact.frontmatter.type)) {
             void this.handleCreateFile(msg, artifact);
             return;
         }
@@ -304,8 +306,10 @@ export class PreviewPanelController {
      * failure) stops the flow without writing.
      */
     private async handleCreateFile(msg: Record<string, unknown>, artifact: ParsedArtifactFile): Promise<void> {
-        // ── D1: single-block only ─────────────────────────────────────────────
-        const blockCheck = validateTemplateBlocks(artifact);
+        const type = artifact.frontmatter.type;
+
+        // ── D1: single-block only (template) / one config file (agent) ────────
+        const blockCheck = validateTemplateBlocks(artifact, getTypeSingular(type));
         if (!blockCheck.ok) {
             void vscode.window.showErrorMessage(`Obsidian Artifacts: ${blockCheck.reason}`);
             return;
@@ -320,14 +324,23 @@ export class PreviewPanelController {
             return;
         }
 
-        // ── Default filename (D3) — throws on a hostile frontmatter extension ──
+        // ── Default filename — throws on a hostile frontmatter value ──────────
+        // Template: D3 extension precedence. Agent: the `target:` key is already the
+        // whole filename (CLAUDE.md, .cursorrules) so it is used verbatim, not
+        // extension-appended — a `target:` carrying `/`, `..`, or a NUL throws,
+        // never sanitised (both resolvers share `assertNoPathInjection`).
         let defaultName: string;
         try {
-            defaultName = resolveTemplateFileName({
-                frontmatterExt: artifact.frontmatter.extension,
-                langId:         artifact.frontmatter.language,
-                fallbackBase:   artifact.frontmatter.title || artifact.fileName,
-            });
+            defaultName = type === 'agent'
+                ? resolveAgentFileName({
+                    target:       artifact.frontmatter.target,
+                    fallbackBase: artifact.frontmatter.title || artifact.fileName,
+                })
+                : resolveTemplateFileName({
+                    frontmatterExt: artifact.frontmatter.extension,
+                    langId:         artifact.frontmatter.language,
+                    fallbackBase:   artifact.frontmatter.title || artifact.fileName,
+                });
         } catch (err) {
             void vscode.window.showErrorMessage(`Obsidian Artifacts: ${(err as Error).message}`);
             return;

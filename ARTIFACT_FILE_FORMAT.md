@@ -219,7 +219,7 @@ DB_URL=mongodb://localhost:27017
 | `snippet` | `Snippets` | yes (or plain text) | language or empty | ` ```vks ` | yes | Editor insert. |
 | `template` | `Templates` | yes (or plain text) | language or empty | ` ```vks ` | **no (D1)** | Explorer → **writes a whole file** into the workspace. Single-block only. `extension:` overrides the fence language (see §5.1). |
 | `command` | `Commands` | yes — **locked to `bash`** | `bash` (locked by serializer) | ` ```vks ` | yes | Terminal insert. |
-| `agent` | `AgentsConf` | optional | language or empty | ` ```vks ` | yes | `provider` / `model` / `version` record the AI provenance (agent-only, §5.2). `target:` names the destination file (e.g. `CLAUDE.md`). Future: multi-file folder + marker. |
+| `agent` | `AgentsConf` | optional | language or empty | ` ```vks ` | yes* | Explorer → **writes a whole file** into the workspace (like `template`), named from `target:` (§5.2). `provider` / `model` / `version` record the AI provenance (agent-only, §5.2). *Create File enforces a single block. Future: multi-file folder + marker. |
 | `variables` | `Variables` | n/a | ` ```vks ` only | the block itself | yes (sub-sets) | `env:` labels the environment. Variable Sets live here. |
 
 Rules a serializer enforces:
@@ -297,6 +297,21 @@ version: "4.8"
   through `parse(serialize(x))`; the create form seeds its inputs from them.
 - **Multi-block (D4).** The agent create form reuses the multi-block machinery
   (`form.multiBlock === true`), matching the §5 agent row.
+
+**Whole-file behaviour (Explorer → Create File).** Like a `template`, invoking an
+agent config from the Explorer **writes its code block to disk as a real file**
+with `<VK-xxx>` resolved — it does not insert at the cursor. Shared with templates
+via `writesWholeFile(type)` (`artifact-type-config.service.ts`), the single source
+for both the preview's `Create File` label and the write-vs-insert branch.
+
+- **Filename from `target:`.** The default (editable) name is seeded from the
+  `target:` frontmatter key (e.g. `CLAUDE.md`); absent, it falls back to the title.
+  `target:` is a path-injection vector — a value carrying `/`, `\`, `..`, or a NUL
+  is **rejected, never sanitised**, and the write is containment-checked against the
+  workspace folder (identical guards to the template `extension:`/typed-name path).
+- **Single-block only for the write.** A 2+ block agent is a Create-File validation
+  error (an agent config is one file), even though the create form permits authoring
+  multiple blocks (D4).
 
 ---
 

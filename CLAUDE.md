@@ -273,6 +273,13 @@ optional, agent-only free-text frontmatter keys — `provider` / `model` / `vers
 `extension` key (single-line enforced via `safeYamlValue`;
 [`ARTIFACT_FILE_FORMAT.md` §5.2](ARTIFACT_FILE_FORMAT.md)).
 
+Like `template`, invoking an `agent` from the Explorer **writes a whole file** (the
+picker's primary button reads **Create File**, not Insert) named from `target:`,
+rather than inserting at the cursor. The write-vs-insert decision has **one owner**:
+`writesWholeFile(type)` in `artifact-type-config.service.ts` — used by both
+`preview.render.ts` (button label) and `preview.ts` (`handleInsert` branch), so the
+label and the behaviour can never drift. Never re-hardcode `type === 'template'`.
+
 ### No runtime dependencies
 
 Only the VS Code API and Node `fs`/`path` — no third-party packages. Keep it

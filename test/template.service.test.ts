@@ -1,6 +1,7 @@
 import * as assert from 'node:assert';
 import {
     resolveTemplateFileName,
+    resolveAgentFileName,
     validateTemplateBlocks,
 } from '../src/services/template.service.js';
 import type { ParsedArtifactFile, ParsedBlock } from '../src/types/parsed-artifact.types.js';
@@ -106,6 +107,31 @@ function parsedWith(blocks: ParsedBlock[]): ParsedArtifactFile {
         blocks,
     };
 }
+
+// ── resolveAgentFileName — target: is the whole filename ─────────────────────────
+
+suite('resolveAgentFileName', () => {
+
+    test('uses target: verbatim when it carries an extension', () => {
+        assert.strictEqual(resolveAgentFileName({ target: 'CLAUDE.md' }), 'CLAUDE.md');
+    });
+
+    test('uses a dotfile target: verbatim — never appends an extension', () => {
+        // The regression: routing a dotfile through the template chain produced
+        // ".cursorrules.md". A target: IS the complete filename.
+        assert.strictEqual(resolveAgentFileName({ target: '.cursorrules' }), '.cursorrules');
+    });
+
+    test('falls back to a .md-suffixed title when target: is absent', () => {
+        assert.strictEqual(resolveAgentFileName({ target: '', fallbackBase: 'Claude reviewer' }), 'Claude reviewer.md');
+        assert.strictEqual(resolveAgentFileName({ fallbackBase: 'notes.txt' }), 'notes.txt');
+    });
+
+    test('rejects a path-injection target: rather than sanitising it', () => {
+        assert.throws(() => resolveAgentFileName({ target: '../../etc/passwd' }), /path separator/);
+        assert.throws(() => resolveAgentFileName({ target: 'a/b.md' }), /path separator/);
+    });
+});
 
 suite('validateTemplateBlocks', () => {
 

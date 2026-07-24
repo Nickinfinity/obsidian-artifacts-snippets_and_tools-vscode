@@ -8,6 +8,7 @@ import {
     getTypeSingular,
     canMultiBlock,
     getCreateFormTypes,
+    writesWholeFile,
 } from '../src/services/artifact-type-config.service.js';
 import { ARTIFACTS } from '../src/types/constants.js';
 import type { ArtifactType } from '../src/types/parsed-artifact.types.js';
@@ -147,6 +148,26 @@ suite('artifact-type-config.service', () => {
         test('returns exactly [agent, snippet, command, template] (order-insensitive)', () => {
             const sorted = [...getCreateFormTypes()].sort();
             assert.deepStrictEqual(sorted, ['agent', 'command', 'snippet', 'template']);
+        });
+    });
+
+    // ── writesWholeFile ──────────────────────────────────────────────────────
+
+    suite('writesWholeFile', () => {
+        // Single source for the Explorer "Create File" flow — both the preview
+        // label and the insert handler branch on it, so they cannot disagree.
+        test('template writes a whole file', () => {
+            assert.strictEqual(writesWholeFile('template'), true);
+        });
+
+        test('agent writes a whole file (target:-named config)', () => {
+            assert.strictEqual(writesWholeFile('agent'), true);
+        });
+
+        test('cursor-insert / terminal types do not', () => {
+            assert.strictEqual(writesWholeFile('snippet'), false);
+            assert.strictEqual(writesWholeFile('command'), false);
+            assert.strictEqual(writesWholeFile('variables'), false);
         });
     });
 

@@ -73,6 +73,26 @@ function carriesExtension(name: string): boolean {
     return lastDot > 0 && lastDot < name.length - 1;
 }
 
+/**
+ * Strips trailing `.` characters from a base name via a linear scan.
+ *
+ * Used instead of `replace(/\.+$/, '')` — an anchored `\.+$` trips SonarLint's
+ * super-linear-backtracking heuristic (S8786); a character scan is unambiguously
+ * linear and reads the same.
+ *
+ * @param s - The candidate base name.
+ * @returns `s` with any trailing dots removed.
+ *
+ * @example
+ * stripTrailingDots('name...') // 'name'
+ * stripTrailingDots('name')    // 'name'
+ */
+function stripTrailingDots(s: string): string {
+    let end = s.length;
+    while (end > 0 && s[end - 1] === '.') { end--; }
+    return s.slice(0, end);
+}
+
 // ── Exports ─────────────────────────────────────────────────────────────────────
 
 /**
@@ -108,10 +128,41 @@ export function resolveTemplateFileName(args: TemplateFileNameArgs): string {
 
     // ── Compose base + resolved extension ─────────────────────────────────────
     const rawBase = typed !== '' ? typed : (args.fallbackBase?.trim() ?? '');
-    const base = rawBase.replace(/\.+$/, '') || 'template';
+    const base = stripTrailingDots(rawBase) || 'template';
 
     const ext = resolveExtension(fmExt, args.langId);
     return ext !== '' ? `${base}.${ext}` : base;
+}
+
+/**
+ * Resolves the output filename for an **agent** create-file flow.
+ *
+ * Unlike a template, an agent's `target:` frontmatter (`CLAUDE.md`, `.cursorrules`,
+ * `AGENTS.md`) **is already the complete intended filename** — it must be used
+ * verbatim, never routed through the extension-appending chain (which would turn a
+ * dotfile like `.cursorrules` into `.cursorrules.md`). When `target` is absent the
+ * name falls back to the title/fileName, defaulting to a `.md` extension since agent
+ * configs are markdown. `target` and the fallback base are path-injection vectors
+ * and **throw** on a separator / `..` / NUL rather than being sanitised.
+ *
+ * @param args - `target` (frontmatter, may be empty) and `fallbackBase` (title/fileName).
+ * @returns The resolved filename.
+ * @throws {Error} When `target` or the fallback base carries a path-injection char.
+ *
+ * @example
+ * resolveAgentFileName({ target: 'CLAUDE.md' })              // 'CLAUDE.md'
+ * resolveAgentFileName({ target: '.cursorrules' })           // '.cursorrules'
+ * resolveAgentFileName({ target: '', fallbackBase: 'Claude reviewer' }) // 'Claude reviewer.md'
+ */
+export function resolveAgentFileName(args: { target?: string; fallbackBase?: string }): string {
+    const target = args.target?.trim() ?? '';
+    if (target !== '') {
+        assertNoPathInjection(target, 'target');
+        return target;
+    }
+    const base = stripTrailingDots(args.fallbackBase?.trim() ?? '') || 'agent';
+    assertNoPathInjection(base, 'filename');
+    return carriesExtension(base) ? base : `${base}.md`;
 }
 
 /**
@@ -144,19 +195,24 @@ function resolveExtension(fmExt: string, langId: string | undefined): string {
  * `##` blocks is a validation error (surfaced in the preview, no write happens).
  * An empty `blocks` array is the classic single-block shape — always ok.
  *
- * @param parsed - The parsed template artifact.
+ * The same single-block rule guards the `agent` create-file flow — an agent
+ * config is one file — so the human label is a parameter (`'template'` by
+ * default, `'agent config'` for agents) rather than hardcoded in the message.
+ *
+ * @param parsed - The parsed file-writing artifact (template or agent).
+ * @param label  - Singular noun for the message (defaults to `'template'`).
  * @returns `{ ok: true }` for 0–1 blocks; `{ ok: false, reason }` naming the count otherwise.
  *
  * @example
- * validateTemplateBlocks({ ...parsed, blocks: [] })          // { ok: true }
- * validateTemplateBlocks({ ...parsed, blocks: [b1, b2] })    // { ok: false, reason: '…2 blocks…' }
+ * validateTemplateBlocks({ ...parsed, blocks: [] })                 // { ok: true }
+ * validateTemplateBlocks({ ...parsed, blocks: [b1, b2] }, 'agent config') // { ok: false, reason: '…2 blocks…' }
  */
-export function validateTemplateBlocks(parsed: ParsedArtifactFile): TemplateBlockCheck {
+export function validateTemplateBlocks(parsed: ParsedArtifactFile, label = 'template'): TemplateBlockCheck {
     const count = parsed.blocks.length;
     if (count > 1) {
         return {
             ok: false,
-            reason: `A template must be a single code block, but this file has ${count} blocks. Split it into separate template files.`,
+            reason: `A ${label} must be a single code block, but this file has ${count} blocks. Split it into separate ${label} files.`,
         };
     }
     return { ok: true };

@@ -159,6 +159,30 @@ export function getCreateFormTypes(): ArtifactType[] {
 }
 
 /**
+ * Reports whether invoking this artifact type writes a whole file into the
+ * workspace (the Explorer "Create File" flow) instead of inserting at the cursor.
+ *
+ * Two types write files: `template` (filename from the D3 extension-precedence
+ * chain) and `agent` (filename seeded from the `target:` frontmatter key, e.g.
+ * `CLAUDE.md`). Every other type inserts at the cursor or sends to the terminal.
+ *
+ * **Single source for the behaviour** — the preview's primary-button label
+ * (`Create File` vs `Insert`) and the insert handler's write-vs-paste branch both
+ * call this, so they can never disagree. Guarded by `artifact-type-config.test.ts`.
+ *
+ * @param type - Canonical `ArtifactType` literal.
+ * @returns `true` for `template` and `agent`; `false` otherwise.
+ *
+ * @example
+ * writesWholeFile('template'); // → true
+ * writesWholeFile('agent');    // → true
+ * writesWholeFile('snippet');  // → false
+ */
+export function writesWholeFile(type: ArtifactType): boolean {
+    return type === 'template' || type === 'agent';
+}
+
+/**
  * Resolves the artifact type that owns a vault directory name.
  *
  * The directory is the type declaration for files that carry no frontmatter —
