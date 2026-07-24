@@ -38,7 +38,8 @@ VK-anotherVar=
 
 - **Frontmatter** — YAML between `---` fences. Recognised keys: `type` (required;
   unknown value falls back to `snippet`), `title`, `description`, `language`,
-  `tags` (inline array `[a, b]`), `env`, `target`.
+  `extension` (template-only, §5.1), `provider` / `model` / `version` (agent-only,
+  §5.2), `tags` (inline array `[a, b]`), `env`, `target`.
 - **Blank line after frontmatter is optional.** The code fence may sit on the
   very next line after the closing `---` (real files do this), or be separated
   by one or more blank lines. A serializer may emit either; round-trip is
@@ -70,9 +71,12 @@ unfenced `vars:` form. Emitting a `vars:` label line immediately before the
 ### 1.1 Serializer rules — single-block
 
 - **Canonical frontmatter key order:** `type`, `title`, `description`,
-  `language`, `tags`, `env`, `target`. Keys with empty/undefined values are
-  omitted (except `type`, always emitted). Reserved keys (`env`, `target`) sit
-  at the end so future additions append cleanly.
+  `language`, `extension`, `provider`, `model`, `version`, `tags`, `env`,
+  `target` (the serializer's `FRONTMATTER_KEY_ORDER`). Keys with empty/undefined
+  values are omitted (except `type`, always emitted). The type-specific keys
+  (`extension` = template, `provider`/`model`/`version` = agent) group after
+  `language`; reserved keys (`env`, `target`) sit at the end so future additions
+  append cleanly.
 - **Language is emitted in both frontmatter and the code fence info-string**
   for single-block files. The parser hoists fence → frontmatter when the
   frontmatter key is missing (`parser.service.ts` line 346); emitting both is
@@ -215,7 +219,7 @@ DB_URL=mongodb://localhost:27017
 | `snippet` | `Snippets` | yes (or plain text) | language or empty | ` ```vks ` | yes | Editor insert. |
 | `template` | `Templates` | yes (or plain text) | language or empty | ` ```vks ` | **no (D1)** | Explorer → **writes a whole file** into the workspace. Single-block only. `extension:` overrides the fence language (see §5.1). |
 | `command` | `Commands` | yes — **locked to `bash`** | `bash` (locked by serializer) | ` ```vks ` | yes | Terminal insert. |
-| `agent` | `AgentsConf` | optional | language or empty | ` ```vks ` | yes | `target:` names the destination file (e.g. `CLAUDE.md`). Future: multi-file folder + marker. |
+| `agent` | `AgentsConf` | optional | language or empty | ` ```vks ` | yes | `provider` / `model` / `version` record the AI provenance (agent-only, §5.2). `target:` names the destination file (e.g. `CLAUDE.md`). Future: multi-file folder + marker. |
 | `variables` | `Variables` | n/a | ` ```vks ` only | the block itself | yes (sub-sets) | `env:` labels the environment. Variable Sets live here. |
 
 Rules a serializer enforces:
@@ -238,8 +242,11 @@ Rules a serializer enforces:
 - **vks fence:** emit only when at least one var has a non-empty default value.
 - **`extension`:** a `type: template`-only frontmatter key. Emitted verbatim
   (single line enforced) when non-empty, in the key order
-  `type · title · description · language · extension · tags · env · target`.
+  `type · title · description · language · extension · provider · model · version · tags · env · target`.
   Parsed as a plain string. Absent/empty for every other type.
+- **`provider` / `model` / `version`:** `type: agent`-only frontmatter keys
+  (§5.2). Each emitted verbatim (single line enforced) when non-empty, in the
+  key order above. Parsed as plain strings. Absent/empty for every other type.
 
 ### 5.1 Templates — whole-file behaviour
 
@@ -263,6 +270,33 @@ resolves them.
   folder picker rooted at the workspace when invoked from the palette. The write
   is containment-checked against the workspace folder before any I/O and creates
   no directory.
+
+### 5.2 Agents — provider / model / version
+
+An `agent` config records which AI it targets via three optional, **agent-only**
+free-text frontmatter keys. They are metadata only — they do not change insert or
+target-file write behaviour.
+
+~~~md
+---
+type: agent
+title: Code reviewer
+provider: Claude
+model: Opus
+version: "4.8"
+---
+~~~
+
+- **Free-text, optional.** Any of the three may be absent; an empty value is
+  **omitted**, never emitted blank. No curated dropdown — the create form renders
+  three plain text inputs, rendered for no other type.
+- **Single-line enforced.** Like `title` / `description` / `extension`, each value
+  is routed through the serializer's `safeYamlValue` so an embedded newline cannot
+  inject a sibling frontmatter key on re-parse. They are parsed as plain strings.
+- **Round-trip.** A hand-authored agent file carrying these keys preserves them
+  through `parse(serialize(x))`; the create form seeds its inputs from them.
+- **Multi-block (D4).** The agent create form reuses the multi-block machinery
+  (`form.multiBlock === true`), matching the §5 agent row.
 
 ---
 

@@ -267,6 +267,12 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
   const extInput = document.getElementById('extension');
   if (extInput) { extInput.addEventListener('input', markDirty); }
 
+  // Agent-only provider/model/version fields — flag dirty on change.
+  ['provider', 'model', 'version'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) { el.addEventListener('input', markDirty); }
+  });
+
   // ── Model extraction ─────────────────────────────────────────────────────
   function extractModel() {
     const type      = blocksArea ? (blocksArea.dataset.type || 'snippet') : 'snippet';
@@ -276,6 +282,13 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     // Template-only extension field; absent (null) for every other type → ''.
     const extEl     = document.getElementById('extension');
     const extension = extEl ? extEl.value.trim() : '';
+    // Agent-only provider/model/version fields; absent (null) elsewhere → ''.
+    const providerEl = document.getElementById('provider');
+    const provider   = providerEl ? providerEl.value.trim() : '';
+    const modelEl    = document.getElementById('model');
+    const model      = modelEl ? modelEl.value.trim() : '';
+    const versionEl  = document.getElementById('version');
+    const version    = versionEl ? versionEl.value.trim() : '';
     const blockEls  = allCards();
     let blocks;
     if (blockEls.length === 0) {
@@ -304,7 +317,7 @@ export const FORM_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
         };
       });
     }
-    return { type: type, title: title, description: desc, extension: extension, tags: tags.slice(), blocks: blocks };
+    return { type: type, title: title, description: desc, extension: extension, provider: provider, model: model, version: version, tags: tags.slice(), blocks: blocks };
   }
 
   function extractVarsForBlock(blockIndex) {

@@ -267,6 +267,12 @@ command registration. `default: true` (`Snippets`, `AgentsConf`) are auto-create
 on first vault selection; `default: false` (`Commands`, `Templates`, `Variables`)
 are detected but never auto-created.
 
+`agent` is a create-form type (`createForm: true`, `multiBlock: true`) with three
+optional, agent-only free-text frontmatter keys — `provider` / `model` / `version`
+— that thread through parser → serializer → form exactly like the template-only
+`extension` key (single-line enforced via `safeYamlValue`;
+[`ARTIFACT_FILE_FORMAT.md` §5.2](ARTIFACT_FILE_FORMAT.md)).
+
 ### No runtime dependencies
 
 Only the VS Code API and Node `fs`/`path` — no third-party packages. Keep it

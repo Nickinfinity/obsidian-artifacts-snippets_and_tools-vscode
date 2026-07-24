@@ -147,7 +147,7 @@ function buildFrontmatterSection(model: ArtifactFormModel): string {
   <label class="slabel" for="description">Description</label>
   <textarea id="description" class="form-input form-textarea" rows="2" placeholder="Optional description">${descVal}</textarea>
 </div>
-${buildExtensionField(model)}<div class="form-section">
+${buildExtensionField(model)}${buildAgentFieldsSection(model)}<div class="form-section">
   <div class="slabel">Tags</div>
   <div class="tags-row" id="tags-row">
 ${chips}    <input type="text" id="tag-input" class="tag-input" placeholder="Add tag…">
@@ -174,6 +174,41 @@ function buildExtensionField(model: ArtifactFormModel): string {
     return `<div class="form-section">
   <label class="slabel" for="extension">File extension <span class="muted">(optional)</span></label>
   <input type="text" id="extension" class="form-input" value="${extVal}" placeholder="e.g. .tsx — overrides the fence language">
+</div>
+`;
+}
+
+/**
+ * Builds the AI-provenance fields — **agents only**. `provider`, `model`, and
+ * `version` are agent-specific frontmatter keys, so the inputs appear for no
+ * other type; every other type gets an empty string here and never posts them.
+ *
+ * Seeds cross the webview boundary, so every value is `escHtml`-escaped, exactly
+ * like `buildExtensionField`.
+ *
+ * @param model - Form model (its `type` gates the fields, the three keys seed them).
+ * @returns The agent form-section HTML, or `''` for non-agent types.
+ *
+ * @example
+ * buildAgentFieldsSection({ type: 'agent', provider: 'Claude', ... }) // → '<div class="form-section">…'
+ * buildAgentFieldsSection({ type: 'snippet', ... })                   // → ''
+ */
+function buildAgentFieldsSection(model: ArtifactFormModel): string {
+    if (model.type !== 'agent') { return ''; }
+    const providerVal = escHtml(model.provider ?? '');
+    const modelVal    = escHtml(model.model ?? '');
+    const versionVal  = escHtml(model.version ?? '');
+    return `<div class="form-section">
+  <label class="slabel" for="provider">Provider <span class="muted">(optional)</span></label>
+  <input type="text" id="provider" class="form-input" value="${providerVal}" placeholder="e.g. Claude">
+</div>
+<div class="form-section">
+  <label class="slabel" for="model">Model <span class="muted">(optional)</span></label>
+  <input type="text" id="model" class="form-input" value="${modelVal}" placeholder="e.g. Opus">
+</div>
+<div class="form-section">
+  <label class="slabel" for="version">Version <span class="muted">(optional)</span></label>
+  <input type="text" id="version" class="form-input" value="${versionVal}" placeholder="e.g. 4.8">
 </div>
 `;
 }
