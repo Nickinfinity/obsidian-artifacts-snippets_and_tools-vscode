@@ -41,8 +41,12 @@ suite('artifact-type-config.service', () => {
             assert.strictEqual(cfg.multiBlock, true);
         });
 
-        test('agent throws (not create-form-enabled)', () => {
-            assert.throws(() => getFormConfig('agent'), /agent/);
+        test('agent returns its form object (create-form-enabled, D4)', () => {
+            const cfg = getFormConfig('agent');
+            assert.strictEqual(cfg.language.mode, 'free');
+            assert.strictEqual(cfg.language.default, '');
+            assert.strictEqual(cfg.label.singular, 'agent config');
+            assert.strictEqual(cfg.multiBlock, true);
         });
 
         test('template returns its form object (Templates-as-files)', () => {
@@ -72,8 +76,12 @@ suite('artifact-type-config.service', () => {
             assert.strictEqual(getLanguageMode('command'), 'locked');
         });
 
+        test('agent === free (create-form-enabled, D4)', () => {
+            assert.strictEqual(getLanguageMode('agent'), 'free');
+        });
+
         test('throws for non-create-form type', () => {
-            assert.throws(() => getLanguageMode('agent'));
+            assert.throws(() => getLanguageMode('variables'));
         });
     });
 
@@ -120,8 +128,12 @@ suite('artifact-type-config.service', () => {
             assert.strictEqual(canMultiBlock('command'), true);
         });
 
+        test('agent === true (D4)', () => {
+            assert.strictEqual(canMultiBlock('agent'), true);
+        });
+
         test('throws for non-create-form type', () => {
-            assert.throws(() => canMultiBlock('agent'));
+            assert.throws(() => canMultiBlock('variables'));
         });
     });
 
@@ -132,9 +144,9 @@ suite('artifact-type-config.service', () => {
         // to satisfy code drift. The helper derives the list from
         // ARTIFACTS[*].createForm === true. Adding a new createForm type
         // anywhere must extend the result automatically.
-        test('returns exactly [snippet, command, template] (order-insensitive)', () => {
+        test('returns exactly [agent, snippet, command, template] (order-insensitive)', () => {
             const sorted = [...getCreateFormTypes()].sort();
-            assert.deepStrictEqual(sorted, ['command', 'snippet', 'template']);
+            assert.deepStrictEqual(sorted, ['agent', 'command', 'snippet', 'template']);
         });
     });
 

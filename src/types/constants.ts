@@ -38,6 +38,15 @@ export const ARTIFACTS: ArtifactsArray = [
 		dir: 'AgentsConf',
 		default: true,
 		contexts: ['explorer'],
+		createForm: true,
+		// D4: agent reuses the multi-block form machinery (matches ARTIFACT_FILE_FORMAT.md §5).
+		// `free` language mirrors snippet/template; provider/model/version are agent-only
+		// frontmatter keys rendered by buildAgentFieldsSection, not a language concern.
+		form: {
+			language: { mode: 'free', default: '' },
+			label: { singular: 'agent config' },
+			multiBlock: true,
+		},
 	},
 	{
 		type: 'command',

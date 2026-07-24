@@ -99,11 +99,21 @@ suite('ARTIFACTS per-type form config', () => {
         assert.strictEqual(findByType('template')!.form!.multiBlock, false);
     });
 
-    // ── excluded types: createForm !== true ──────────────────────────────────
+    // ── agent form config (create-form + provider/model/version) ─────────────
 
-    test('agent: createForm !== true (different authoring flow)', () => {
-        assert.notStrictEqual(findByType('agent')!.createForm, true);
+    test('agent: createForm === true', () => {
+        assert.strictEqual(findByType('agent')!.createForm, true);
     });
+
+    test('agent: form.language.mode === free', () => {
+        assert.strictEqual(findByType('agent')!.form!.language.mode, 'free');
+    });
+
+    test('agent: form.multiBlock === true (D4)', () => {
+        assert.strictEqual(findByType('agent')!.form!.multiBlock, true);
+    });
+
+    // ── excluded types: createForm !== true ──────────────────────────────────
 
     test('variables: createForm !== true (own save-as flow)', () => {
         assert.notStrictEqual(findByType('variables')!.createForm, true);

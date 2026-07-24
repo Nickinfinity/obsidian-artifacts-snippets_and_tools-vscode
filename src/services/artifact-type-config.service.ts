@@ -32,8 +32,8 @@ export function getEntry(type: ArtifactType): Artifact {
 /**
  * Returns the per-type form configuration for a create-form-enabled type.
  *
- * Throws when the requested type is not create-form-enabled (e.g. `agent`,
- * `template`, `variables`) — the form UI should never reach this code path
+ * Throws when the requested type is not create-form-enabled (e.g.
+ * `variables`) — the form UI should never reach this code path
  * for an excluded type. Use `getCreateFormTypes()` to drive the type picker
  * so excluded types are never offered.
  *
@@ -152,7 +152,7 @@ export function getAllTypes(): ArtifactType[] {
  * @returns Array of `ArtifactType` literals (order matches `ARTIFACTS` order).
  *
  * @example
- * getCreateFormTypes(); // → ['snippet', 'command']
+ * getCreateFormTypes(); // → ['snippet', 'agent', 'command', 'template']
  */
 export function getCreateFormTypes(): ArtifactType[] {
     return ARTIFACTS.filter(e => e.createForm === true).map(e => e.type);
