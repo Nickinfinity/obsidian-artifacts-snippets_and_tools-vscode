@@ -22,6 +22,8 @@
  * so this unit-tests without an extension host.
  */
 
+import { MAX_PANE_WIDTH_PX } from '../types/constants.js';
+
 /**
  * The undocumented workbench command ids this controller drives.
  *
@@ -36,8 +38,6 @@ export const PANE_WIDTH_COMMANDS = {
     widen: 'workbench.action.increaseViewWidth',
     narrow: 'workbench.action.decreaseViewWidth',
 } as const;
-
-import { MAX_PANE_WIDTH_PX } from '../types/constants.js';
 
 /** Runs one workbench command by id. Injected so this module never calls `vscode.commands.executeCommand` itself. */
 export type CommandRunner = (commandId: string) => Promise<void>;
@@ -134,6 +134,14 @@ export class PaneWidthController {
      * is by construction rather than by keeping two counters in sync.
      */
     private widenedSteps = 0;
+    /**
+     * Latched before the first `await`, because `widenedSteps` is only assigned
+     * once the stepping loop finishes. Without it two overlapping
+     * `widenForPreview()` calls — reachable from the navigator's 120 ms-debounced
+     * hover, which re-renders into one shared controller — both pass the
+     * `widenedSteps > 0` guard and widen twice, leaving the restore short.
+     */
+    private widening = false;
     /**
      * Which command id actually grew the pane, learned by probing.
      *
@@ -261,15 +269,20 @@ export class PaneWidthController {
      *   swallowed (see `runStep`), so this itself never rejects.
      */
     async widenForPreview(): Promise<void> {
-        if (this.widenedSteps > 0) { return; }
-        if (this.measure) {
-            this.widenedSteps = await this.widenToTarget(this.measure);
-            return;
+        if (this.widenedSteps > 0 || this.widening) { return; }
+        this.widening = true;
+        try {
+            if (this.measure) {
+                this.widenedSteps = await this.widenToTarget(this.measure);
+                return;
+            }
+            for (let i = 0; i < this.steps; i++) {
+                await this.runStep(PANE_WIDTH_COMMANDS.widen);
+            }
+            this.widenedSteps = this.steps;
+        } finally {
+            this.widening = false;
         }
-        for (let i = 0; i < this.steps; i++) {
-            await this.runStep(PANE_WIDTH_COMMANDS.widen);
-        }
-        this.widenedSteps = this.steps;
     }
 
     /**
@@ -291,14 +304,6 @@ export class PaneWidthController {
     }
 
     /**
-     * Runs one command through the injected runner, swallowing a
-     * rejection — a cosmetic resize must never break an insert, so this
-     * controller can never be the reason a caller's `await` throws.
-     *
-     * @param commandId - One of `PANE_WIDTH_COMMANDS`.
-     * @returns Resolves always, regardless of whether `run` rejected.
-     */
-    /**
      * Waits for the pane to finish relaying out after a widen step.
      *
      * Injected-free and deliberately crude: there is no layout-settled signal
@@ -313,6 +318,18 @@ export class PaneWidthController {
         return new Promise(resolve => setTimeout(resolve, SETTLE_MS));
     }
 
+    /**
+     * Runs one command through the injected runner, swallowing a rejection.
+     *
+     * A cosmetic resize must never be the reason a caller's `await` throws, so
+     * this controller can fail only silently and harmlessly.
+     *
+     * @param commandId - One of {@link PANE_WIDTH_COMMANDS}.
+     * @returns Resolves always, whether or not `run` rejected.
+     *
+     * @example
+     * await this.runStep(PANE_WIDTH_COMMANDS.widen);
+     */
     private async runStep(commandId: string): Promise<void> {
         try {
             await this.run(commandId);

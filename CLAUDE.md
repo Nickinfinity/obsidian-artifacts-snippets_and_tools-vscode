@@ -176,8 +176,11 @@ Sync — **create only, never auto-delete.**
 
 On folder pick: `validateObsidianVault()` (requires `.obsidian/`) →
 `detectVaultDirs()` → auto-create the `default: true` entries → persist path and
-feature flags to `obsidianArtifacts.*` (Settings Sync). It is the **only writer**
-of that config section; it sources the section name from `CONFIG_SECTION`.
+feature flags to `obsidianArtifacts.*` (Settings Sync). It is the only **panel** that writes that config section, and sources the
+section name from `CONFIG_SECTION`. One programmatic writer also exists —
+`config.service.ts`'s `setVariablesHeightFraction`, for the drag handle, which
+lives beside its matching reader rather than reaching into the section from a
+UI file. Those two are the whole set; nothing else may call `update()` on it.
 
 ### Single sources of truth
 
@@ -959,6 +962,14 @@ file. Stateless/pure → its `*.helpers.ts`. Service/cross-cutting →
 `src/services/`, never the panel. Only if all three are "no" with a reason does
 it go in the existing file. Notice a file crossed 400 lines while finishing a
 feature → propose the split in that PR, not later.
+
+**Known debt from the main-pane wave, not yet paid:**
+`artifactPicker/preview.ts` is **619** lines — past the ~400 guideline and the
+~500 "plan a split" mark. The seam is the one `artifactForm/` already uses and
+that this file was split on once before: controller (`preview.ts`) · renderers
+(`preview.render.ts`) · webview script (`preview.clientJs.ts`) · pure helpers
+(`preview.helpers.ts`). The width/measure plumbing and the staged-edit handlers
+are the natural next extractions. `settings.panel.ts` is **441**.
 
 **Files near the guideline today** (measured with `wc -l`, not guessed —
 re-measure before trusting these numbers on a later read): `commands/variables.command.ts`

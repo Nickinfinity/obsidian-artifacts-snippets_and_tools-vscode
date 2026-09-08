@@ -49,5 +49,5 @@ button:hover {
 }
 
 .expand-editor-btn:hover {
-  background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
+  background-color: var(--vscode-toolbar-hoverBackground, transparent);
 }

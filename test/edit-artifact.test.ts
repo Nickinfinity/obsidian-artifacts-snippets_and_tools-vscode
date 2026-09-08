@@ -1,7 +1,7 @@
 import * as assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { artifactToFormModel } from '../src/commands/create-prefill.helpers.js';
+import { artifactToFormModel, unsupportedEditReason } from '../src/commands/create-prefill.helpers.js';
 import { parseFromContent } from '../src/services/parser.service.js';
 import { serializeArtifact } from '../src/services/artifact-serializer.service.js';
 import type { ArtifactFormModel } from '../src/types/artifact-form.types.js';
@@ -259,5 +259,129 @@ suite('delete artifact', () => {
             'create mode must not resolve a file to delete',
         );
         assert.ok(handler.includes('confirmDiscardDraft'), 'create mode has no discard confirmation');
+    });
+});
+
+/**
+ * Guards the refusals that stop edit mode destroying content.
+ *
+ * The form round-trips through the webview, where `extractModel()` rebuilds the
+ * model from DOM fields — so a frontmatter key with no input is gone by the
+ * time Save runs. For a create that is harmless; for an edit it deletes the
+ * user's content. Each case below was confirmed to lose data before the guard
+ * existed.
+ */
+suite('edit mode — refuses what the form cannot round-trip', () => {
+
+    function parseMd(md: string) {
+        const parsed = parseFromContent(md, '/v/AIPrompts/demo.md', '/v');
+        assert.ok(parsed, 'fixture failed to parse');
+        return parsed;
+    }
+
+    test('a flagged artifact is refused, not silently reduced to a fence', () => {
+        // The flag markers and every note line outside the region are not
+        // modelled at all — saving replaced the whole file with one fence.
+        const md = [
+            '---',
+            'artifactType: AIPrompt',
+            'title: Review',
+            '---',
+            '',
+            'Notes that are not part of the artifact.',
+            '',
+            '%%oa:start%%',
+            'Review the repo.',
+            '%%oa:end%%',
+            '',
+        ].join('\n');
+        const parsed = parseMd(md);
+        const reason = unsupportedEditReason(parsed, md);
+        assert.ok(reason, 'a flagged artifact was accepted for editing');
+        assert.match(reason, /flags/i);
+    });
+
+    test('a template index is refused — index links are read-side only', () => {
+        const md = [
+            '---',
+            'artifactType: Template',
+            'title: Scaffold',
+            'index: true',
+            '---',
+            '',
+            '```markdown',
+            '- [[one]]',
+            '```',
+            '',
+        ].join('\n');
+        const reason = unsupportedEditReason(parseMd(md), md);
+        assert.ok(reason, 'an index artifact was accepted for editing');
+        assert.match(reason, /index/i);
+    });
+
+    test('an artifact declaring env: is refused — the model has no field for it', () => {
+        const md = [
+            '---',
+            'artifactType: Snippet',
+            'title: Demo',
+            'env: prod',
+            'language: bash',
+            '---',
+            '',
+            '```bash',
+            'echo hi',
+            '```',
+            '',
+        ].join('\n');
+        const reason = unsupportedEditReason(parseMd(md), md);
+        assert.ok(reason, 'an env-carrying artifact was accepted for editing');
+        assert.match(reason, /env/i);
+    });
+
+    test('an ordinary snippet is still editable', () => {
+        const md = [
+            '---',
+            'artifactType: Snippet',
+            'title: Demo',
+            'language: bash',
+            '---',
+            '',
+            '```bash',
+            'echo hi',
+            '```',
+            '',
+        ].join('\n');
+        assert.strictEqual(unsupportedEditReason(parseMd(md), md), undefined);
+    });
+});
+
+suite('edit command — boundaries', () => {
+
+    const commandSource = fs.readFileSync(
+        path.join(__dirname, '..', '..', 'src', 'commands', 'editArtifact.command.ts'),
+        'utf8',
+    );
+
+    test('SEC: the path is contained to the vault before it is read', () => {
+        // The command is callable by any extension, and the path it is given is
+        // later written by save-in-place and trash-deleted by Delete Artifact.
+        assert.ok(commandSource.includes('isPathWithin('), 'no containment check on the edit path');
+        assert.ok(
+            commandSource.indexOf('isPathWithin(') < commandSource.indexOf('parseArtifactFile('),
+            'the file is read before containment is checked',
+        );
+    });
+
+    test('a non-create-form type is rejected with a message, not a thrown command', () => {
+        // getFormConfig('Variables') throws; ungated, the Edit button would fail
+        // as an unhandled command error.
+        assert.ok(commandSource.includes('getCreateFormTypes()'), 'no create-form gate on the edit command');
+    });
+
+    test('the round-trip refusal runs before the form opens', () => {
+        assert.ok(
+            commandSource.indexOf('unsupportedEditReason(') < commandSource.indexOf('openArtifactFormPanel('),
+            'the form opens before the lossy-edit check',
+        );
     });
 });

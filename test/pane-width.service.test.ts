@@ -200,3 +200,35 @@ suite('PaneWidthController', () => {
         assert.deepStrictEqual(calls, []);
     });
 });
+
+/**
+ * Guards the re-entrancy latch.
+ *
+ * `widenedSteps` is only assigned once the stepping loop finishes, and the loop
+ * now awaits a settle plus a measurement per step — so the `> 0` guard does not
+ * latch *during* it. Two overlapping calls both passed, widened twice, and the
+ * restore undid only half. Reachable in the real pane: the navigator re-renders
+ * into one shared controller on a 120 ms-debounced hover.
+ */
+suite('PaneWidthController — concurrent widen', () => {
+
+    test('two overlapping widens produce one widen, and restore returns to the start', async () => {
+        let width = 300;
+        const calls: string[] = [];
+        const run = async (id: string): Promise<void> => {
+            calls.push(id);
+            width += id === PANE_WIDTH_COMMANDS.widen ? 50 : -50;
+        };
+        const measure = async () => ({ paneWidth: width, availWidth: 1500 });
+        const controller = new PaneWidthController(run, 3, measure);
+
+        // Not awaited in sequence — this is the overlap the latch exists for.
+        await Promise.all([controller.widenForPreview(), controller.widenForPreview()]);
+        const widened = width;
+        await controller.restoreAfterPreview();
+
+        assert.ok(widened >= 500, `concurrent widen stopped short at ${widened}px`);
+        assert.strictEqual(width, 300,
+            `restore left the pane at ${width}px instead of 300px — the two widens were not deduplicated`);
+    });
+});

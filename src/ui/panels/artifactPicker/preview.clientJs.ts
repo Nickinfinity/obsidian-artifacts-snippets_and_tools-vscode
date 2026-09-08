@@ -92,6 +92,8 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     }
   });
 
+  const varsSection = document.getElementById('varsSection');
+
   // ── Variables-section resize ─────────────────────────────────────────────
   // The extension cannot read this pane's size, so the drag is resolved here:
   // pointer position becomes a fraction of the pane, applied locally for
@@ -130,7 +132,6 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
   }
 
   // ── Variable-set buttons ─────────────────────────────────────────────────
-  const varsSection = document.getElementById('varsSection');
   let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
 
   function refreshSaveBtn() {

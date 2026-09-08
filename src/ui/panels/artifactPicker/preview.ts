@@ -12,7 +12,6 @@ import { confirmModal } from '../../../services/confirm.service.js';
 import type { WebviewHost, HostMessage } from './webviewHost.js';
 import type { MainViewPreviewState } from '../../views/mainView.preview.js';
 import { renderPreviewHtml, renderMultiBlockPreviewHtml, renderPopupEmptyHtml, mergeVarsWithDefaults } from './preview.render.js';
-import { FullEditController } from './fullEditor.js';
 import { BlockEditController } from './blockEditor.js';
 import { VarSetController } from './varSetController.js';
 import { runCreateFileFlow, toBatchOutcome } from './preview.createFile.js';
@@ -94,7 +93,6 @@ export class PreviewPanelController {
     private currentArtifact: ParsedArtifactFile | undefined;
     private modeController: PreviewModeController | undefined;
     private msgSub: vscode.Disposable | undefined;
-    private readonly fullEdit:  FullEditController;
     private readonly blockEdit: BlockEditController;
     private readonly varSet:    VarSetController;
     private readonly batch = new BatchGate();  // one-shot per-step gate a MultiIndexRunner arms (T4)
@@ -131,14 +129,6 @@ export class PreviewPanelController {
     private stagedCode: string | undefined;
 
     constructor(private readonly cb: PreviewCallbacks) {
-        this.fullEdit = new FullEditController({
-            rootFs:              cb.rootFs,
-            getCurrentArtifact:  () => this.currentArtifact,
-            setCurrentArtifact:  a => { this.currentArtifact = a; },
-            setCache:            cb.setCache,
-            postMessage:         msg => { this.postToWebview(msg); },
-            getViewColumn:       () => undefined,
-        });
         this.blockEdit = new BlockEditController({
             rootFs:              cb.rootFs,
             storageUri:          cb.storageUri,
@@ -202,7 +192,6 @@ export class PreviewPanelController {
     dispose(): void {
         if (!this.open) { return; }
         this.open = false;
-        this.fullEdit.teardown();
         void this.blockEdit.teardown();
         this.msgSub?.dispose();
         this.msgSub          = undefined;
@@ -240,7 +229,6 @@ export class PreviewPanelController {
      * await controller.showPreview(artifact);
      */
     async showPreview(artifact: ParsedArtifactFile, blockRef?: BlockRef): Promise<void> {
-        this.fullEdit.teardown();
         void this.blockEdit.teardown();
         this.currentBlockRef = blockRef ?? { kind: 'single' };
         this.stagedCode = undefined;
@@ -350,6 +338,20 @@ export class PreviewPanelController {
         this.pendingMeasure?.({ paneWidth, availWidth });
     }
 
+    /**
+     * Asks the webview how wide it is and resolves with what it reports.
+     *
+     * Rides the **session** message handler (`pendingMeasure`) rather than a
+     * subscription of its own — see the field's own note for why a second
+     * subscriber is not an option here.
+     *
+     * @returns The metrics, or `undefined` when the view did not answer within
+     *          {@link MEASURE_TIMEOUT_MS} — a dead or hidden view must never
+     *          hang an insert.
+     *
+     * @example
+     * const m = await this.measurePane(); // { paneWidth: 312, availWidth: 1920 }
+     */
     private measurePane(): Promise<PaneMetrics | undefined> {
         return new Promise(resolve => {
             const finish = (value: PaneMetrics | undefined): void => {
@@ -503,7 +505,9 @@ export class PreviewPanelController {
             rootFs:   this.cb.rootFs,
         });
         if (!updated) {
-            vscode.window.showErrorMessage('Could not write the changes — the block was not found in the file.');
+            // `persistBlockCode` also answers undefined when the patch was a
+            // no-op, which is the "nothing changed" case rather than a failure.
+            vscode.window.showWarningMessage('Nothing was written — the code is unchanged, or the block could not be located in the file.');
             return;
         }
 
@@ -559,7 +563,6 @@ export class PreviewPanelController {
         const resolvedVars = mergeVarsWithDefaults(msg.vars as Record<string, string>, artifact.vars);
 
         void performInsert(this.cb.targetEditor, { ...artifact, code }, resolvedVars, this.cb.invocationSurface);
-        this.fullEdit.teardown();
         this.dispose();
         this.cb.closePicker();
     }

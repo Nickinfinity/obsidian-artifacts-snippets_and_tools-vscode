@@ -1,8 +1,12 @@
 import * as vscode from 'vscode';
+import { readFileSync } from 'node:fs';
 import { parseArtifactFile } from '../services/parser.service.js';
 import { artifactToFormModel } from './create-prefill.helpers.js';
 import { openArtifactFormPanel } from '../ui/panels/artifactForm/panel.js';
 import { getVaultRootUri } from '../services/config.service.js';
+import { isPathWithin } from '../utils/path-containment.js';
+import { getCreateFormTypes } from '../services/artifact-type-config.service.js';
+import { unsupportedEditReason } from './create-prefill.helpers.js';
 
 /** Command id the preview pane's Edit action runs. */
 export const EDIT_ARTIFACT_COMMAND_ID = 'obsidian-artifacts.editArtifact';
@@ -32,6 +36,16 @@ export function registerEditArtifactCommand(context: vscode.ExtensionContext): v
             vscode.window.showErrorMessage('Could not open artifact for editing: vault not configured.');
             return;
         }
+        // The path arrives from a registered command, so any extension can call
+        // this with any path. It is subsequently written by the form's
+        // save-in-place and trash-deleted by Delete Artifact, so containment is
+        // checked here, before the read — the same rule every other write in
+        // this repo routes through. Rejected, never sanitised.
+        if (!isPathWithin(vaultRoot.fsPath, filePath)) {
+            vscode.window.showErrorMessage('Refusing to edit a file outside the configured vault.');
+            return;
+        }
+
         // `parseArtifactFile` answers null for an unreadable or malformed file
         // rather than throwing, so this is the only failure branch to handle.
         const parsed = parseArtifactFile(filePath, vaultRoot.fsPath);
@@ -43,6 +57,19 @@ export function registerEditArtifactCommand(context: vscode.ExtensionContext): v
         const type = prefill.artifactType;
         if (!type) {
             vscode.window.showErrorMessage('Could not open artifact for editing: unrecognised artifact type.');
+            return;
+        }
+        // Gated against the same list the form is built from — `getFormConfig`
+        // throws for a non-create-form type (Variables), which would surface as
+        // an unhandled command failure rather than a message.
+        if (!getCreateFormTypes().includes(type)) {
+            vscode.window.showWarningMessage(`${type} artifacts have no form — open the .md directly to edit one.`);
+            return;
+        }
+        // Refuse rather than silently drop content the form cannot round-trip.
+        const blocked = unsupportedEditReason(parsed, readFileSync(filePath, 'utf-8'));
+        if (blocked) {
+            vscode.window.showWarningMessage(blocked);
             return;
         }
         openArtifactFormPanel(context, {

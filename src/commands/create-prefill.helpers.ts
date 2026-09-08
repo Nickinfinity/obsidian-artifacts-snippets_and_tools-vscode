@@ -1,5 +1,6 @@
 import * as path from 'node:path';
 import { mapLanguageId } from '../services/language-map.service.js';
+import { extractFlaggedRegions } from '../services/flags.service.js';
 import { getFilenameField } from '../services/artifact-type-config.service.js';
 import type { ArtifactType, ParsedArtifactFile } from '../types/parsed-artifact.types.js';
 import type { ArtifactFormModel } from '../types/artifact-form.types.js';
@@ -146,4 +147,46 @@ export function artifactToFormModel(parsed: ParsedArtifactFile): Partial<Artifac
         version:      fm.version,
         blocks,
     };
+}
+
+/**
+ * Explains why an artifact cannot be safely edited through the form, if so.
+ *
+ * The form is a **lossy** representation of a `.md`: it round-trips through
+ * the webview, where `extractModel()` rebuilds the model from DOM fields, so
+ * anything without an input is gone by the time Save runs. For a create that
+ * is harmless — the fields never existed. For an edit it **deletes the user's
+ * content from their vault**, silently and irreversibly.
+ *
+ * Three cases the form cannot carry today, each refused rather than quietly
+ * dropped:
+ * - **Flagged payloads** (the marker syntax `flags.service.ts` owns) — the
+ *   region markers and every line
+ *   of surrounding note outside them are not modelled at all; a save replaces
+ *   the whole file with a single fence.
+ * - **`index: true` / `paths:`** — read-side-only keys the serializer never
+ *   emits (see `ARTIFACT_FILE_FORMAT.md` §8), so a saved index stops being an
+ *   index.
+ * - **`env:`** — in the serializer's key order but absent from
+ *   `ArtifactFormModel`, so it has no field to survive in.
+ *
+ * @param parsed - The parsed artifact.
+ * @param body   - Raw file content, needed because flags are a body-level syntax.
+ * @returns A human-readable reason, or `undefined` when editing is safe.
+ *
+ * @example
+ * const reason = unsupportedEditReason(parsed, content);
+ * if (reason) { vscode.window.showWarningMessage(reason); return; }
+ */
+export function unsupportedEditReason(parsed: ParsedArtifactFile, body: string): string | undefined {
+    if (extractFlaggedRegions(body).length > 0) {
+        return 'This artifact uses Obsidian comment flags, which the form cannot represent. Editing it here would discard the flags and any notes around them — open the .md directly instead.';
+    }
+    if (parsed.frontmatter.index === true || (parsed.frontmatter.paths?.length ?? 0) > 0) {
+        return 'This artifact is a template index. The form does not carry index links, so saving would stop it being an index — open the .md directly instead.';
+    }
+    if (parsed.frontmatter.env) {
+        return 'This artifact declares env:, which the form has no field for. Saving would drop it — open the .md directly instead.';
+    }
+    return undefined;
 }
