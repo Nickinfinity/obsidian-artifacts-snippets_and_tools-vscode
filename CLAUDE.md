@@ -367,6 +367,24 @@ rediscover one through a silently dropped message:
   width). Guards: `test/main-view-styles.test.ts` (sheet order) and
   `test/main-view-css.test.ts` (layout rules).
 
+### F5 status — the UI is confirmed to render (2026-09-07)
+
+**The main-pane wave's F5 pass was run and reported passing by the repo owner.**
+That is the first human confirmation on this branch that any of this
+extension's UI renders at all — every earlier gate had been cleared by
+instruction.
+
+Take the scope literally: it confirms the wave's click-paths as exercised, not
+every state of every panel. The suite still renders no webview, so **a green
+suite remains necessary and nowhere near sufficient** for anything visual; that
+rule has not softened. What changed is that the baseline is no longer unknown.
+
+Worth remembering *why* it matters here: immediately before this pass, review
+found the preview's whole client script was aborting on load (a Temporal Dead
+Zone `ReferenceError`), so the pane widen had been dead in a real window while
+1205 tests passed and were reported as working. `test/webview-script-executes.test.ts`
+exists because of that and is the one test that would have caught it.
+
 ### The pane resize — measured, not assumed
 
 `WebviewView` exposes **no** width member and the workbench width commands are
