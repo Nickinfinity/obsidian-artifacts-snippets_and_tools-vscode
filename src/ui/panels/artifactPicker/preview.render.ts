@@ -102,6 +102,9 @@ ${styleLinkTags(cssUri)}
   </div>
   ${desc ? `<p class="desc">${desc}</p>` : ''}
   ${tagsHtml ? `<div class="tags">${tagsHtml}</div>` : ''}
+  <div class="dirty-notice" id="dirtyNotice" hidden>
+    Temporary changes — they affect this insert only. Click Overwrite to save them to the <code>.md</code>.
+  </div>
   ${buildCodeBlockHtml(codeRowsHtml, lang)}
   <div class="slabel">Variables</div>
   <div id="varsSection">
@@ -111,11 +114,13 @@ ${styleLinkTags(cssUri)}
       <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
     </div>
   </div>
+  <div class="vars-resize-handle" id="varsResizeHandle" role="separator" aria-orientation="horizontal"
+       aria-label="Resize the variables section" tabindex="0"></div>
   <div class="actions">
     <button class="btn btn-insert"    id="insertBtn">${primaryLabel}</button>
     <button class="btn btn-secondary" id="copyBtn">Copy</button>
-    <button class="btn btn-secondary" id="editBlockBtn">Edit Block</button>
-    <button class="btn btn-secondary" id="editBtn">Edit .md</button>
+    <button class="btn btn-secondary" id="overwriteBtn" hidden>Overwrite</button>
+    <button class="btn btn-secondary" id="editBtn">Edit</button>
     <button class="btn btn-cancel"    id="cancelBtn">Cancel</button>
   </div>
   <p class="path">${e(a.relativePath)}</p>

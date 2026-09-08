@@ -1,7 +1,7 @@
 import * as path from 'node:path';
 import { mapLanguageId } from '../services/language-map.service.js';
 import { getFilenameField } from '../services/artifact-type-config.service.js';
-import type { ArtifactType } from '../types/parsed-artifact.types.js';
+import type { ArtifactType, ParsedArtifactFile } from '../types/parsed-artifact.types.js';
 import type { ArtifactFormModel } from '../types/artifact-form.types.js';
 
 // ── Pure prefill builders (exported for unit tests) ───────────────────────────
@@ -95,4 +95,55 @@ export function buildFilePrefill(
     }
 
     return prefill;
+}
+
+/**
+ * Builds a full prefill from an already-parsed artifact, for opening the form
+ * in **edit** mode.
+ *
+ * The inverse of what the form's save path emits: every field the serializer
+ * writes is carried back so a round trip through the form is lossless for the
+ * fields the form owns. A multi-block file maps one `ParsedBlock` per form
+ * block; a single-block file yields exactly one block with an empty heading,
+ * which is the shape `serializeArtifact` reads to choose the output form.
+ *
+ * Pure and `vscode`-free like its sibling builders — the caller reads and
+ * parses the file.
+ *
+ * @param parsed - The artifact as `parser.service` produced it.
+ * @returns A prefill carrying the artifact's current content.
+ *
+ * @example
+ * artifactToFormModel(parseArtifactFile('/v/Snippets/demo.md')).title // → 'Demo'
+ */
+export function artifactToFormModel(parsed: ParsedArtifactFile): Partial<ArtifactFormModel> {
+    const fm = parsed.frontmatter;
+    const blocks = parsed.blocks.length > 0
+        ? parsed.blocks.map(b => ({
+            heading:     b.heading ?? '',
+            description: b.description ?? '',
+            language:    b.fenceLang ?? fm.language ?? '',
+            code:        b.code ?? '',
+            vars:        b.vars ?? [],
+        }))
+        : [{
+            heading:     '',
+            description: '',
+            language:    fm.language ?? '',
+            code:        parsed.code ?? '',
+            vars:        parsed.vars ?? [],
+        }];
+
+    return {
+        artifactType: fm.artifactType,
+        title:        fm.title ?? '',
+        description:  fm.description ?? '',
+        tags:         fm.tags ?? [],
+        extension:    fm.extension,
+        target:       fm.target,
+        provider:     fm.provider,
+        model:        fm.model,
+        version:      fm.version,
+        blocks,
+    };
 }

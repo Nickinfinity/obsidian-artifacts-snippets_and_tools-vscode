@@ -28,10 +28,50 @@
   min-width: 0;
 }
 
+/*
+ * T1 (VSX-235 / VSX-236 CSS half): the width can never be read back (see
+ * CLAUDE.md §1), so the action row wraps instead of assuming a breakpoint —
+ * several buttons per line where width allows, one per line only once it
+ * genuinely runs out. `min-width` is what keeps a button readable instead of
+ * being squeezed to nothing as it wraps.
+ */
 .actions {
-  flex-direction: column;
+  flex-wrap: wrap;
 }
 
 .btn {
-  width: 100%;
+  flex: 0 1 auto;
+  min-width: 110px;
+}
+
+/*
+ * Height-bounded so the action row below it stays reachable no matter how
+ * many <VK-xxx> vars an artifact declares. `--oa-vars-height` is the hook
+ * T2's drag handle writes to at runtime; this sheet only owns the fallback.
+ */
+#varsSection {
+  max-height: var(--oa-vars-height, calc(100vh / 6));
+  overflow-y: auto;
+}
+
+/*
+ * Drag handle for the variables section. The pane cannot report its own height
+ * to the extension, so the drag converts a pointer position into a *fraction*
+ * of the pane and writes `--oa-vars-height` locally; the extension only ever
+ * sees that fraction (clamped by `pane-layout.service`).
+ */
+.vars-resize-handle {
+  height: 6px;
+  margin: 2px 0 8px;
+  border-radius: 3px;
+  cursor: ns-resize;
+  background: var(--vscode-widget-border, var(--vscode-panel-border));
+  opacity: 0.6;
+}
+
+.vars-resize-handle:hover,
+.vars-resize-handle:focus {
+  opacity: 1;
+  background: var(--vscode-focusBorder);
+  outline: none;
 }

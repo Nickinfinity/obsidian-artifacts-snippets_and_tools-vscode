@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import { buildFormHtml } from './form.html.js';
 import { FORM_CLIENT_JS } from './form.clientJs.js';
 import { defaultModel } from './form.helpers.js';
-import { pruneVarsForSave } from './panel.helpers.js';
+import { pruneVarsForSave, confirmDeleteFile, confirmDiscardDraft, deleteArtifactFile } from './panel.helpers.js';
 import { FormBlockExpandController } from './blockExpand.js';
 import { serializeArtifact } from '../../../services/artifact-serializer.service.js';
 import { writeArtifact } from '../../../services/artifact-writer.service.js';
@@ -81,11 +81,13 @@ export function decideFormPanelAction(args: {
  * @param type - The artifact type the form is targeting.
  * @returns The window title.
  * @example
- * panelTitle('Snippet'); // → 'Obsidian Artifacts: Create Snippets'
+ * panelTitle('Snippet', 'create'); // → 'Obsidian Artifacts: Create Snippets'
+ * panelTitle('Snippet', 'edit');   // → 'Obsidian Artifacts: Edit Snippets'
  */
-function panelTitle(type: ArtifactType): string {
+function panelTitle(type: ArtifactType, mode: OpenFormOpts['mode']): string {
     // type always comes from getCreateFormTypes(), so the lookup cannot miss.
-    return `Obsidian Artifacts: Create ${getEntry(type).name}`;
+    const verb = mode === 'edit' ? 'Edit' : 'Create';
+    return `Obsidian Artifacts: ${verb} ${getEntry(type).name}`;
 }
 
 /**
@@ -201,7 +203,7 @@ class ArtifactFormController {
      * controller.open();
      */
     open(): void {
-        const title = panelTitle(this.opts.type);
+        const title = panelTitle(this.opts.type, this.opts.mode);
 
         this.panel = vscode.window.createWebviewPanel(
             FORM_VIEW_TYPE,
@@ -284,7 +286,7 @@ class ArtifactFormController {
         this.opts  = opts;
         this.model = buildModel(opts);
         this.dirty = false;
-        if (this.panel) { this.panel.title = panelTitle(opts.type); }
+        if (this.panel) { this.panel.title = panelTitle(opts.type, opts.mode); }
         this.render();
         this.reveal();
     }
@@ -378,18 +380,36 @@ class ArtifactFormController {
         this.post({ command: 'removeBlockConfirmed', blockIndex, confirmed: answer === 'Delete' });
     }
 
+    /**
+     * Handles the Delete Artifact button.
+     *
+     * Two different actions behind one label, because the label is honest in
+     * both cases: in **edit** mode there is a file on disk and "delete" must
+     * remove it, while in **create** mode nothing has been written yet, so the
+     * only thing to delete is the draft.
+     *
+     * The file deletion goes to the OS trash rather than being unlinked — this
+     * is the user's vault, and a recoverable delete is worth the one extra
+     * modal it costs nothing to make honest about.
+     *
+     * @returns Resolves once the user has answered and any deletion is done.
+     */
     private async handleDeleteEntire(): Promise<void> {
-        const singular = getTypeSingular(this.opts.type);
-        const answer   = await vscode.window.showWarningMessage(
-            `Delete entire ${singular}? All unsaved changes will be lost.`,
-            { modal: true },
-            'Delete',
-        );
-        if (answer === 'Delete') {
-            this.dispose();
-        } else {
+        const sourceUri = this.opts.mode === 'edit' ? this.opts.sourceUri : undefined;
+        const confirmed = sourceUri
+            ? await confirmDeleteFile(sourceUri)
+            : await confirmDiscardDraft(getTypeSingular(this.opts.type));
+
+        if (!confirmed) {
             this.post({ command: 'deleteEntireConfirmed', confirmed: false });
+            return;
         }
+
+        if (sourceUri && !await deleteArtifactFile(sourceUri)) {
+            this.post({ command: 'deleteEntireConfirmed', confirmed: false });
+            return;
+        }
+        this.dispose();
     }
 
     private async handleCancel(dirty: boolean): Promise<void> {
@@ -426,6 +446,15 @@ class ArtifactFormController {
             return;
         }
 
+        // Edit mode writes back to the file it was opened from: the destination
+        // is already known, so the folder picker and filename prompt — both of
+        // which exist to *choose* a location — would be asking a question that
+        // has an answer. Saving an edit is one click, as it is in any editor.
+        if (this.opts.mode === 'edit' && this.opts.sourceUri) {
+            await this.saveInPlace(model, this.opts.sourceUri);
+            return;
+        }
+
         const baseDir = vscode.Uri.joinPath(vaultRoot, baseDirName);
 
         // Step 1: destination folder
@@ -450,6 +479,33 @@ class ArtifactFormController {
         const pruned  = { ...model, blocks: pruneVarsForSave(model.blocks) };
         const content = serializeArtifact(pruned);
         await this.writeWithCollision(vaultRoot, model.artifactType, chosenDir, fileName, content);
+    }
+
+    /**
+     * Writes an edited artifact back over its source file.
+     *
+     * Bypasses `writeArtifact`'s collision check on purpose: that check exists
+     * to stop a *new* file clobbering an existing one, and here the existing
+     * file is the intended target — prompting "already exists, overwrite?" for
+     * the file the user just opened for editing would be noise.
+     *
+     * @param model     - The edited model from the webview.
+     * @param sourceUri - File the form was opened from.
+     * @returns Resolves once the file is written and the panel closed.
+     *
+     * @example
+     * await this.saveInPlace(model, vscode.Uri.file('/v/Snippets/demo.md'));
+     */
+    private async saveInPlace(model: ArtifactFormModel, sourceUri: vscode.Uri): Promise<void> {
+        const pruned  = { ...model, blocks: pruneVarsForSave(model.blocks) };
+        const content = serializeArtifact(pruned);
+        try {
+            await vscode.workspace.fs.writeFile(sourceUri, Buffer.from(content, 'utf8'));
+        } catch (err) {
+            this.post({ command: 'saveResult', ok: false, error: `Could not save: ${(err as Error).message}` });
+            return;
+        }
+        this.dispose();
     }
 
     private async writeWithCollision(

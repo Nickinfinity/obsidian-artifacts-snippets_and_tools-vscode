@@ -1,5 +1,6 @@
 import { escHtml } from '../../../utils/html.js';
 import { WEBVIEW_ESC_LBL_JS } from './webviewSnippets.js';
+import { CODE_BLOCK_MIN_LINES } from '../../../types/constants.js';
 
 /**
  * Builds the contenteditable code-block HTML fragment.
@@ -18,8 +19,12 @@ import { WEBVIEW_ESC_LBL_JS } from './webviewSnippets.js';
  */
 export function buildCodeBlockHtml(rowsHtml: string, lang: string): string {
     return /* html */`
-  <div class="slabel">Content <span class="slabel-hint">— editable, not saved to .md</span></div>
-  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false" data-lang="${escHtml(lang)}">${rowsHtml || ''}</div>`;
+  <div class="code-toolbar">
+    <button class="expand-editor-btn" id="expandCodeBtn" title="Open this block in the editor"
+            aria-label="Open this block in the editor">⤢</button>
+  </div>
+  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false"
+       style="--oa-code-min-lines: ${CODE_BLOCK_MIN_LINES}" data-lang="${escHtml(lang)}">${rowsHtml || ''}</div>`;
 }
 
 /**

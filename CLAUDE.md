@@ -115,6 +115,10 @@ src/
 │   ├── scratch-file.service.ts       # THE temp edit-file lifecycle (real files under extension storage)
 │   ├── create-index.service.ts       # N captured paths → sibling files + an index (pure)
 │   ├── variables-crud.service.ts · variables-writer.service.ts  # Variables mutation + whole-file .md writer
+│   ├── pane-width.service.ts         # THE pane-resize rule — closed-loop widen to a
+│   │                                 # measured target, equal-and-opposite restore (vscode-free)
+│   ├── pane-layout.service.ts        # THE variables-height bounds — clamp + varsHeightCss (vscode-free)
+│   ├── confirm.service.ts            # THE modal confirm — confirmModal (Cancel and Escape both = no)
 │   └── preview-mode.service.ts · temp-document.service.ts
 ├── ui/
 │   ├── views/                        # The activity-bar surfaces (WebviewView-based, not TreeDataProvider)
@@ -206,6 +210,11 @@ regression this list exists to prevent; each is held by a named guard test.
 | Temp edit files on disk | `services/scratch-file.service.ts` — `openScratchFile` | covered via `blockEditor.ts` callers |
 | Create-flow capture shape | `types/artifact-form.types.ts` — `CaptureResult` / `CaptureFn<T>` | — (no test names either symbol; enforced by the compiler only — every `commands/capture/*.ts` function is typed to return `CaptureResult \| undefined` (`captureTerminal` is async, so `Promise<…>` of it)) |
 | Variables `.md` mutation | `services/variables-crud.service.ts` + `variables-writer.service.ts` — through `serializeArtifact`, never a bespoke emitter | covered via `test/variables-*.test.ts` |
+| Pane-width command ids + resize rule | `services/pane-width.service.ts` — `PANE_WIDTH_COMMANDS`, `widenForPreview`/`restoreAfterPreview` | `test/pane-width.service.test.ts` — the closed-loop suite drives a fake pane whose width *responds*, including inverted |
+| Variables-height bounds | `services/pane-layout.service.ts` — `clampVarsHeightFraction`, `varsHeightCss` | `test/pane-layout.service.test.ts` — bounds, hostile input, the `package.json` mirror, **and that `varsHeightCss` has a caller** |
+| Modal confirmation | `services/confirm.service.ts` — `confirmModal` | covered via `test/edit-artifact.test.ts` (delete) and `test/preview-buttons.test.ts` (overwrite) |
+| Block-code writes | `artifactPicker/preview.helpers.ts` — `persistBlockCode`, wrapping `patchBlockCode` | `test/preview-buttons.test.ts` — `preview.ts` may not call `patchBlockCode` directly |
+| Max pane width / code-area min height | `types/constants.ts` — `MAX_PANE_WIDTH_PX`, `CODE_BLOCK_MIN_LINES` | `test/preview-buttons.test.ts` — the sheet must read the custom property, never a second literal |
 
 **Context menus are driven by `constants.ts`, always.** An artifact's
 `contexts` field is the single source for *where* its command shows (editor /
@@ -354,6 +363,60 @@ rediscover one through a silently dropped message:
   rule of its own by design — horizontal overflow is unreachable regardless of
   width). Guards: `test/main-view-styles.test.ts` (sheet order) and
   `test/main-view-css.test.ts` (layout rules).
+
+### The pane resize — measured, not assumed
+
+`WebviewView` exposes **no** width member and the workbench width commands are
+undocumented internals that act on the **focused** view. Two facts cost real
+debugging here, both now pinned by tests:
+
+- **The extension host cannot read the pane's width — but the webview can.**
+  It is a real DOM, so `window.innerWidth` inside `PREVIEW_CLIENT_JS` measures
+  the pane and posts it back (`measurePane` → `paneMetrics`). The plan's
+  premise that "the width cannot be read back" is true only of the *host* API.
+  This is what makes the widen closed-loop instead of a blind step count.
+- **The commands frequently land on the editor group, not the pane** — in which
+  case `increaseViewWidth` *shrinks* the sidebar, exactly inverting the intent.
+  Focus cannot be forced (the QuickPick holds it during hover previews), so
+  `PaneWidthController` **probes**: one step, re-measure, and if the pane got
+  smaller it undoes the probe and swaps the two ids for the session. Restore
+  uses whichever id is the opposite of the one that worked, so the
+  equal-and-opposite guarantee survives either polarity.
+
+Target is `min(screen.availWidth / 3, MAX_PANE_WIDTH_PX)`. `screen.availWidth`
+is the **screen**, not the VS Code window — the two differ when the window is
+not maximised, and that is an accepted, deliberate approximation (nothing
+exposes the window's size). The accepted sash-drag limitation from the plan
+still stands: a drag *during* a preview offsets the restore, and no
+compensating heuristic may be added.
+
+**A webview message cannot subscribe its own handler.**
+`MainViewProvider.onWebviewMessage` is a single-handler **setter**, not a
+multicast event: a second subscriber silently replaces the first, and disposing
+it clears the slot outright. That killed Cancel, Edit and Insert once. Anything
+needing an inbound reply rides the session handler (`pendingMeasure` is the
+pattern). Guard: `test/main-view-integration.test.ts` — "Cancel still routes
+after showPreview".
+
+### Editing an artifact — one form, two modes
+
+`Edit` in the preview opens the **artifact form**, not the raw `.md`: same
+panel, same column as create (`editArtifact.command.ts` exists because the form
+needs the `ExtensionContext` the preview does not carry).
+`artifactToFormModel` (`create-prefill.helpers.ts`) is the inverse of the
+serializer — **anything it drops is deleted from the vault on the next Save**,
+which is why `test/edit-artifact.test.ts` asserts it field by field and round
+trips parse → model → serialize → parse.
+
+Edit-mode save writes straight back to `sourceUri`: no folder picker, no
+filename prompt, no collision check (that check exists to stop a *new* file
+clobbering an existing one, and here the existing file is the target).
+
+**Preview edits are staged, never live.** Typing in the code area *and* saving
+in the expanded editor (`⤢`) both stage; only **Overwrite** writes, behind a
+`confirmModal`. `BlockEditController` used to patch and write the `.md` on every
+save — two editing surfaces for one block with opposite durability — and no
+longer touches disk at all. `persistBlockCode` is the single write path.
 
 ### Create form — three durable findings (`src/ui/panels/artifactForm/panel.ts`)
 

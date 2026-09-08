@@ -33,6 +33,12 @@ export interface BlockEditCallbacks {
     postMessage: (msg: unknown) => void;
     /** Returns the preview panel's view column so the temp file opens as a tab beside it (same group). */
     getViewColumn: () => vscode.ViewColumn | undefined;
+    /**
+     * Receives the saved block text. The owner decides what to do with it —
+     * the preview stages it as a pending edit rather than writing to disk, so
+     * this controller no longer touches the vault at all.
+     */
+    onCodeStaged: (newCode: string) => void;
 }
 
 /**
@@ -151,33 +157,21 @@ export class BlockEditController {
     }
 
     /**
-     * Patches the source `.md` with the saved temp content, re-parses, and pushes
-     * the refreshed artifact back to the preview.
+     * Hands the saved temp content back to the preview as a **staged** edit.
+     *
+     * This used to patch and write the source `.md` on every save, which made
+     * the expanded editor a permanent write while typing in the preview's own
+     * code area was not — two editing surfaces for one block with opposite
+     * durability. Both are now staged, and `Overwrite` is the single place an
+     * edit becomes permanent (`persistBlockCode`).
+     *
+     * @param newCode - Text the user saved in the temp file.
      */
     private async onSave(newCode: string): Promise<void> {
         if (!this.sourceUri || !this.blockRef) { return; }
         if (!this.cb.getCurrentArtifact()) { return; }
-
-        try {
-            const bytes   = await vscode.workspace.fs.readFile(this.sourceUri);
-            const content = new TextDecoder().decode(bytes);
-            const patched = patchBlockCode(content, this.blockRef, newCode);
-            if (patched === content) {
-                out.appendLine('[blockEdit] save: no change (block not found?)');
-                return;
-            }
-
-            await vscode.workspace.fs.writeFile(this.sourceUri, new TextEncoder().encode(patched));
-            const updated = parseFromContent(patched, this.sourceUri.fsPath, this.cb.rootFs);
-            this.cb.setCache(this.sourceUri, updated);
-
-            const next = this.adaptForPreview(updated);
-            this.cb.setCurrentArtifact(next);
-            this.cb.postMessage({ command: 'fileUpdated', artifact: next });
-            out.appendLine('[blockEdit] save: patched source .md');
-        } catch (e) {
-            out.appendLine(`[blockEdit] save failed: ${(e as Error).message}`);
-        }
+        this.cb.onCodeStaged(newCode);
+        out.appendLine('[blockEdit] save: staged into the preview (not written to disk)');
     }
 
     /**

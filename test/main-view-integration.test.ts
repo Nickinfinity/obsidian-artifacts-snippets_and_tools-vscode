@@ -242,9 +242,69 @@ suite('ORCH-7 integration — main pane joins (ledger #116)', () => {
         visible = true;
         host.flushOnVisible();
 
-        assert.deepStrictEqual(posted, [],
+        // Asserted by command rather than on an empty array: `showPreview` now
+        // also posts the pane-width `measurePane` handshake, which is expected
+        // traffic. The defect this test exists for is unchanged — A's stale
+        // update must never survive the swap — and still fails it.
+        assert.deepStrictEqual(
+            posted.filter(m => (m as { command?: string }).command === 'fileUpdated'),
+            [],
             "artifact A's queued message reached the sink after switching to B — showPreview did not clear the queue");
         assert.strictEqual(rendered.length, 1, 'showPreview did not render');
+    });
+
+    // ── Gate 2c: the width probe must not unseat the session message handler ──
+
+    test('Cancel still routes after showPreview — the width probe leaves one live handler', async () => {
+        // Shipped defect: the pane-width measurement subscribed its own handler
+        // through `onWebviewMessage`, which is a single-handler *setter* and not
+        // a multicast event. The probe replaced the session handler and its
+        // disposal cleared the slot outright, so Cancel, Edit and Insert all went
+        // dead in the real pane while all 1163 tests stayed green — nothing here
+        // routed a user action *after* a render.
+        let visible = true;
+        const target: WebviewHostTarget = {
+            postMessage: () => true,
+            html: '',
+            cspSource: 'vscode-webview:',
+            asWebviewUri: u => u,
+            get visible() { return visible; },
+            onDidChangeViewState: () => ({ dispose() { /* not exercised */ } }),
+            onDidDispose: () => ({ dispose() { /* not exercised */ } }),
+        };
+
+        let handler: ((msg: Record<string, unknown>) => void) | undefined;
+        let subscriptions = 0;
+        let disposed = false;
+
+        const controller = new PreviewPanelController({
+            extensionUri: vscode.Uri.file('/ext'),
+            rootFs: '/v',
+            targetEditor: undefined,
+            setCache: () => { /* no cache in this test */ },
+            onDispose: () => { disposed = true; },
+            host: new WebviewHost(target),
+            ensureView: async () => { /* pane already "live" */ },
+            endPreview: () => { /* not exercised */ },
+            showPreviewState: () => { /* rendering covered elsewhere */ },
+            onWebviewMessage: h => {
+                subscriptions++;
+                handler = h;
+                return new vscode.Disposable(() => { handler = undefined; });
+            },
+            closePicker: () => { /* not exercised */ },
+            storageUri: vscode.Uri.file('/storage'),
+            invocationSurface: 'editor',
+        });
+
+        await controller.showPreview(fakeArtifact());
+
+        assert.strictEqual(subscriptions, 1,
+            'the width probe added a second subscriber — onWebviewMessage is a setter, so it unseated the session handler');
+        assert.ok(handler, 'no live message handler after showPreview');
+
+        handler?.({ command: 'cancel' });
+        assert.ok(disposed, 'Cancel did not reach the controller after a render');
     });
 
     // ── Gate 1b: every render re-ensures, so a hide-dispose cannot kill the pane ──

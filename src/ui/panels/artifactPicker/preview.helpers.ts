@@ -1,5 +1,7 @@
 import * as vscode from 'vscode';
-import { resolveVars } from '../../../services/parser.service.js';
+import { resolveVars, parseFromContent } from '../../../services/parser.service.js';
+import { patchBlockCode, type BlockRef } from '../../../services/artifact-patcher.service.js';
+import { out } from './shared.js';
 import { getEntry } from '../../../services/artifact-type-config.service.js';
 import type { ArtifactContext } from '../../../types/artifact.types.js';
 import type { ArtifactType, ParsedArtifactFile, ParsedBlock } from '../../../types/parsed-artifact.types.js';
@@ -296,4 +298,44 @@ export async function performInsert(
     // function is already async for the terminal confirmation.
     await vscode.env.clipboard.writeText(content);
     vscode.window.showInformationMessage('Obsidian Artifacts: No active editor — content copied to clipboard.');
+}
+
+/**
+ * Writes new code for one block back into its source `.md`.
+ *
+ * **THE** block-code persist path. Both routes that make an edit permanent —
+ * the preview's Overwrite button and anything else that needs to commit a
+ * block — go through here, so the patch/write/re-parse sequence and its
+ * "block not found" guard exist once. `patchBlockCode` remains the only thing
+ * that understands fence structure; this adds the I/O around it.
+ *
+ * @param opts - `sourceUri` of the `.md`, the `blockRef` identifying the fence,
+ *               the `newCode`, and `rootFs` for re-parsing.
+ * @returns The re-parsed artifact on success; `undefined` when the block could
+ *          not be located or the write failed (both already logged).
+ *
+ * @example
+ * const updated = await persistBlockCode({ sourceUri, blockRef, newCode, rootFs });
+ * if (updated) { setCache(sourceUri, updated); }
+ */
+export async function persistBlockCode(opts: {
+    sourceUri: vscode.Uri;
+    blockRef:  BlockRef;
+    newCode:   string;
+    rootFs:    string;
+}): Promise<ParsedArtifactFile | undefined> {
+    try {
+        const bytes   = await vscode.workspace.fs.readFile(opts.sourceUri);
+        const content = new TextDecoder().decode(bytes);
+        const patched = patchBlockCode(content, opts.blockRef, opts.newCode);
+        if (patched === content) {
+            out.appendLine('[persistBlockCode] no change (block not found?)');
+            return undefined;
+        }
+        await vscode.workspace.fs.writeFile(opts.sourceUri, new TextEncoder().encode(patched));
+        return parseFromContent(patched, opts.sourceUri.fsPath, opts.rootFs);
+    } catch (e) {
+        out.appendLine(`[persistBlockCode] failed: ${(e as Error).message}`);
+        return undefined;
+    }
 }

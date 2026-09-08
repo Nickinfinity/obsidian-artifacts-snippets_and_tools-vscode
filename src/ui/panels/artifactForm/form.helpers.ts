@@ -85,16 +85,20 @@ export function labelForAddBlock(type: ArtifactType): string {
 }
 
 /**
- * Returns the label for the "delete entire artifact" footer button.
+ * Returns the label for the delete footer button.
  *
- * Always derived from `getTypeSingular(type)` — never a hard-coded type string.
+ * The same wording for every type: the per-type singular made the button read
+ * as if it deleted only part of the file ("delete entire snippet" beside a
+ * per-block delete), and the type is already stated everywhere else on the
+ * form. `type` is retained so the signature does not churn at four call sites
+ * and a future per-type wording stays a one-line change.
  *
- * @param type - Canonical artifact type.
- * @returns Label string e.g. `'Delete entire snippet'`.
+ * @param _type - Canonical artifact type; unused, see above.
+ * @returns The button label.
  *
  * @example
- * labelForDeleteEntire('Command') // → 'Delete entire command'
+ * labelForDeleteEntire('Command') // → 'Delete Artifact'
  */
-export function labelForDeleteEntire(type: ArtifactType): string {
-    return `Delete entire ${getTypeSingular(type)}`;
+export function labelForDeleteEntire(_type: ArtifactType): string {
+    return 'Delete Artifact';
 }

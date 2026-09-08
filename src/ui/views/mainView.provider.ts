@@ -1,6 +1,13 @@
 import * as vscode from 'vscode';
 import { getNonce } from '../../utils/helpers.js';
-import { buildCreateItems, renderIdleHtml, resolveCreateCommandId } from './mainView.render.js';
+import {
+    buildCreateItems,
+    buildBrowseItems,
+    renderIdleHtml,
+    resolveCreateCommandId,
+    resolveBrowseCommandId,
+    SETTINGS_COMMAND_ID,
+} from './mainView.render.js';
 import { renderMainViewPreviewHtml, type MainViewPreviewState, type ViewTarget } from './mainView.preview.js';
 import type { DisposableLike, UriLike, WebviewHostTarget } from '../panels/artifactPicker/webviewHost.js';
 
@@ -55,6 +62,41 @@ function isCreateTypeMessage(message: unknown): message is { command: 'createTyp
     }
     const m = message as Record<string, unknown>;
     return m.command === 'createType' && typeof m.type === 'string';
+}
+
+/**
+ * Resolves an idle-mode row click to the command it should run.
+ *
+ * The three idle messages are routed in one place so `handleMessage` stays a
+ * two-branch dispatcher: anything this does not claim falls through to the
+ * preview session's handler. Every `type` is gated by the resolver that owns
+ * its list, so a webview naming an unknown type resolves to nothing rather
+ * than to an unregistered command id.
+ *
+ * @param message - Raw webview message.
+ * @returns The command id to execute, or `undefined` if this is not an idle-row message.
+ *
+ * @example
+ * resolveIdleCommandId({ command: 'openSettings' }) // → 'obsidian-artifacts.settings'
+ */
+function resolveIdleCommandId(message: unknown): string | undefined {
+    if (typeof message !== 'object' || message === null) {
+        return undefined;
+    }
+    const m = message as Record<string, unknown>;
+    if (m.command === 'openSettings') {
+        return SETTINGS_COMMAND_ID;
+    }
+    if (typeof m.type !== 'string') {
+        return undefined;
+    }
+    if (isCreateTypeMessage(message)) {
+        return resolveCreateCommandId(message.type);
+    }
+    if (m.command === 'browseType') {
+        return resolveBrowseCommandId(m.type);
+    }
+    return undefined;
 }
 
 /**
@@ -282,17 +324,14 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
      * @param message - Raw message from the webview.
      */
     private handleMessage(message: unknown): void {
-        if (!isCreateTypeMessage(message)) {
-            if (typeof message === 'object' && message !== null) {
-                this.previewMessageHandler?.(message as Record<string, unknown>);
-            }
+        const commandId = resolveIdleCommandId(message);
+        if (commandId) {
+            void vscode.commands.executeCommand(commandId);
             return;
         }
-        const commandId = resolveCreateCommandId(message.type);
-        if (!commandId) {
-            return;
+        if (typeof message === 'object' && message !== null) {
+            this.previewMessageHandler?.(message as Record<string, unknown>);
         }
-        void vscode.commands.executeCommand(commandId);
     }
 
     // ── Render ───────────────────────────────────────────────────────────────
@@ -307,7 +346,7 @@ export class MainViewProvider implements vscode.WebviewViewProvider {
             webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'src', 'ui', f)).toString(),
         );
         webview.html = this.mode === 'idle'
-            ? renderIdleHtml(buildCreateItems(), cssUris, webview.cspSource, getNonce())
+            ? renderIdleHtml(buildCreateItems(), cssUris, webview.cspSource, getNonce(), buildBrowseItems())
             : renderMainViewPreviewHtml(this.previewState, cssUris, webview.cspSource, getNonce());
     }
 }

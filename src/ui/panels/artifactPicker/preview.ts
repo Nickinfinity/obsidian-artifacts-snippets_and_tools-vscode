@@ -7,7 +7,8 @@ import { PreviewModeController, type SectionKey } from '../../../services/previe
 import { getNonce } from '../../../utils/helpers.js';
 import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js';
 import { out } from './shared.js';
-import { performInsert, type InvocationSurface } from './preview.helpers.js';
+import { performInsert, persistBlockCode, type InvocationSurface } from './preview.helpers.js';
+import { confirmModal } from '../../../services/confirm.service.js';
 import type { WebviewHost, HostMessage } from './webviewHost.js';
 import type { MainViewPreviewState } from '../../views/mainView.preview.js';
 import { renderPreviewHtml, renderMultiBlockPreviewHtml, renderPopupEmptyHtml, mergeVarsWithDefaults } from './preview.render.js';
@@ -17,10 +18,17 @@ import { VarSetController } from './varSetController.js';
 import { runCreateFileFlow, toBatchOutcome } from './preview.createFile.js';
 import { BatchGate } from './preview.batch.js';
 import { isIndexArtifact } from '../../../services/multi-index.service.js';
+import { PaneWidthController, type PaneMetrics } from '../../../services/pane-width.service.js';
+import { getPreviewWidthSteps, getVariablesHeightFraction, setVariablesHeightFraction } from '../../../services/config.service.js';
+import { varsHeightCss } from '../../../services/pane-layout.service.js';
+import { EDIT_ARTIFACT_COMMAND_ID } from '../../../commands/editArtifact.command.js';
 import type { BatchOutcome } from '../../../types/multi-index.types.js';
 
 // Re-export the adapter so the navigator does not need to import preview.helpers directly.
 export { blockAsArtifact } from './preview.helpers.js';
+
+/** How long a pane measurement may take before the widen loop gives up on the view. */
+const MEASURE_TIMEOUT_MS = 600;
 
 /** Callback bag the controller uses to push state back to the navigator. */
 export interface PreviewCallbacks {
@@ -90,8 +98,37 @@ export class PreviewPanelController {
     private readonly blockEdit: BlockEditController;
     private readonly varSet:    VarSetController;
     private readonly batch = new BatchGate();  // one-shot per-step gate a MultiIndexRunner arms (T4)
-    /** Which code fence the Edit Block action targets; updated on each `showPreview`. */
+    /**
+     * Widens the pane for the session and narrows it back by the same count.
+     *
+     * Built here rather than injected because the navigator constructs one
+     * controller per picker invocation, so the configured step count is
+     * re-read on every insert instead of being frozen at activation.
+     */
+    private readonly paneWidth = new PaneWidthController(
+        async id => { await vscode.commands.executeCommand(id); },
+        getPreviewWidthSteps(),
+        () => this.measurePane(),
+    );
+    /**
+     * Resolver for an in-flight `measurePane` round trip.
+     *
+     * The measurement rides the **session** message handler rather than a
+     * subscription of its own: `onWebviewMessage` is a single-handler setter,
+     * not a multicast event, so a second subscriber silently replaces the
+     * first and disposing it clears the handler outright — which killed
+     * Cancel, Edit and Insert.
+     */
+    private pendingMeasure: ((m: PaneMetrics | undefined) => void) | undefined;
+    /** Which fence in the source `.md` this preview's code belongs to. */
     private currentBlockRef: BlockRef = { kind: 'single' };
+    /**
+     * Latest staged code from the expanded editor, if any.
+     *
+     * Staged, not written: the preview's own code area and the expanded editor
+     * are two views of one block, and neither is permanent until Overwrite.
+     */
+    private stagedCode: string | undefined;
 
     constructor(private readonly cb: PreviewCallbacks) {
         this.fullEdit = new FullEditController({
@@ -110,6 +147,7 @@ export class PreviewPanelController {
             setCache:            cb.setCache,
             postMessage:         msg => { this.postToWebview(msg); },
             getViewColumn:       () => undefined,
+            onCodeStaged:        code => { this.stageCode(code); },
         });
         this.varSet = new VarSetController(cb.extensionUri, {
             getCurrentArtifact: () => this.currentArtifact,
@@ -171,6 +209,11 @@ export class PreviewPanelController {
         this.modeController  = undefined;
         this.currentArtifact = undefined;
         this.batch.settle({ kind: 'aborted' });  // no-op unless still armed (D5)
+        // Every preview-end path funnels here (insert, cancel, edit, batch
+        // abort) and the `open` guard above makes it once-per-session, so this
+        // is the one place the widen is undone. Fire-and-forget: `dispose()` is
+        // sync by contract, and a failed narrow must never break an insert.
+        void this.paneWidth.restoreAfterPreview();
         this.cb.endPreview();
         this.cb.onDispose();
     }
@@ -191,8 +234,6 @@ export class PreviewPanelController {
      * Shows the artifact in the main pane's interactive preview mode.
      *
      * @param artifact - Single-block artifact (or block-adapted artifact) to display.
-     * @param blockRef - Source `.md` fence the Edit Block action targets; defaults
-     *                   to `{ kind: 'single' }`.
      * @returns Resolves once the pane has rendered.
      *
      * @example
@@ -201,8 +242,9 @@ export class PreviewPanelController {
     async showPreview(artifact: ParsedArtifactFile, blockRef?: BlockRef): Promise<void> {
         this.fullEdit.teardown();
         void this.blockEdit.teardown();
-        this.currentArtifact = artifact;
         this.currentBlockRef = blockRef ?? { kind: 'single' };
+        this.stagedCode = undefined;
+        this.currentArtifact = artifact;
         this.modeController  = new PreviewModeController(artifact.code);
 
         // Before `ensureHost`, never after: `ensureView` re-attaches the target
@@ -214,6 +256,8 @@ export class PreviewPanelController {
         const varSources = this.modeController?.getAllVarSources() ?? {};
         this.cb.showPreviewState({ kind: 'single', artifact, varSources });
         this.setupMessageHandler();
+        this.postVarsHeight();
+        void this.paneWidth.widenForPreview();
         out.appendLine(`[pane] preview → ${artifact.fileName}`);
     }
 
@@ -230,6 +274,7 @@ export class PreviewPanelController {
         this.cb.host.clearQueue();   // before ensureHost — see showPreview (ledger #119)
         if (!await this.ensureHost()) { return; }
         this.cb.showPreviewState({ kind: 'multi', artifact });
+        void this.paneWidth.widenForPreview();
         out.appendLine(`[pane] multi-block preview → ${artifact.fileName} (${artifact.blocks.length} blocks)`);
     }
 
@@ -276,12 +321,59 @@ export class PreviewPanelController {
 
     // ── Internal: webview message routing ─────────────────────────────────────
 
+    /**
+     * Asks the webview how wide it is, with its own one-shot subscription.
+     *
+     * The extension host has no way to read a `WebviewView`'s width, but the
+     * webview is a real DOM and can measure itself. This uses a subscription
+     * of its own rather than the session handler because the widen loop runs
+     * alongside normal message traffic and must not consume it.
+     *
+     * @returns The reported metrics, or `undefined` if the view did not answer
+     *          in time — a dead or hidden view must never hang an insert.
+     *
+     * @example
+     * const m = await this.measurePane(); // { paneWidth: 312, availWidth: 1920 }
+     */
+    /**
+     * Hands a `paneMetrics` reply to whatever measurement is in flight.
+     *
+     * @param msg - Raw webview message; ignored unless both widths are numbers.
+     *
+     * @example
+     * this.resolveMeasure({ command: 'paneMetrics', paneWidth: 312, availWidth: 1920 });
+     */
+    private resolveMeasure(msg: Record<string, unknown>): void {
+        const paneWidth  = msg.paneWidth;
+        const availWidth = msg.availWidth;
+        if (typeof paneWidth !== 'number' || typeof availWidth !== 'number') { return; }
+        this.pendingMeasure?.({ paneWidth, availWidth });
+    }
+
+    private measurePane(): Promise<PaneMetrics | undefined> {
+        return new Promise(resolve => {
+            const finish = (value: PaneMetrics | undefined): void => {
+                if (!this.pendingMeasure) { return; }
+                this.pendingMeasure = undefined;
+                clearTimeout(timer);
+                resolve(value);
+            };
+            const timer = setTimeout(() => { finish(undefined); }, MEASURE_TIMEOUT_MS);
+            this.pendingMeasure = finish;
+            this.cb.host.post({ command: 'measurePane' });
+        });
+    }
+
     private setupMessageHandler(): void {
         this.msgSub?.dispose();
         this.msgSub = undefined;
         if (!this.open) { return; }
         this.msgSub = this.cb.onWebviewMessage(msg => {
-            void this.handleMessage(msg as Record<string, unknown>);
+            const m = msg as Record<string, unknown>;
+            // Answered here rather than in `handleMessage` so the width probe
+            // stays off the user-action routing chain entirely.
+            if (m.command === 'paneMetrics') { this.resolveMeasure(m); return; }
+            void this.handleMessage(m);
         });
     }
 
@@ -292,10 +384,12 @@ export class PreviewPanelController {
         else if (cmd === 'quickEdit')     { this.modeController?.enterQuickEdit(); }
         else if (cmd === 'backToPreview') { this.modeController?.enterPreview(); }
         else if (cmd === 'fullEdit')      { this.handleFullEdit(); }
-        else if (cmd === 'editBlock')     { await this.handleEditBlock(); }
         else if (cmd === 'saveSection')   { await this.handleSaveSection(msg); }
         else if (cmd === 'insert')        { this.handleInsert(msg); }
         else if (cmd === 'copy')          { this.handleCopy(msg); }
+        else if (cmd === 'editBlock')     { await this.handleEditBlock(); }
+        else if (cmd === 'overwrite')     { await this.handleOverwrite(msg); }
+        else if (cmd === 'varsHeightChanged') { await this.handleVarsHeightChanged(msg); }
         else if (cmd === 'cancel')        { this.cancel(); }
         else if (cmd === 'pickVarSet')    { await this.varSet.handlePickVarSet(msg); }
         else if (cmd === 'confirmApply')  { this.varSet.handleConfirmApply(); }
@@ -307,16 +401,29 @@ export class PreviewPanelController {
     /** Cancel: settles the batch gate `skipped` when armed (D5); else disposes as before. */
     private cancel(): void { if (this.batch.isArmed) { this.batch.settle({ kind: 'skipped' }); return; } this.dispose(); }
 
+    /**
+     * Opens the artifact in the create/edit form, the same panel and column a
+     * create opens in — rather than the raw `.md` in a text editor.
+     *
+     * Routed through a command because the form needs the `ExtensionContext`,
+     * which this controller does not carry. The preview session ends first:
+     * the form is now the editing surface, so leaving the pane in preview mode
+     * behind it would show a stale copy of what the user is editing.
+     */
     private handleFullEdit(): void {
         const artifact = this.currentArtifact;
         if (!artifact) { return; }
-        this.modeController?.enterFullEdit();
-        this.fullEdit.start(vscode.Uri.file(artifact.filePath));
+        const filePath = artifact.filePath;
+        this.dispose();
+        void vscode.commands.executeCommand(EDIT_ARTIFACT_COMMAND_ID, filePath);
     }
 
     /**
-     * Opens just the previewed code block as a temp file in extension storage;
-     * saving it patches the matching fence in the source `.md` (`fileUpdated`).
+     * Opens the previewed block as a temp file in the full editor.
+     *
+     * Reuses `BlockEditController` — the same machinery the button removed in
+     * the previous pass drove, now reporting its save back as a staged edit
+     * instead of writing to the vault.
      */
     private async handleEditBlock(): Promise<void> {
         const artifact = this.currentArtifact;
@@ -324,9 +431,86 @@ export class PreviewPanelController {
         await this.blockEdit.start(
             artifact,
             this.currentBlockRef,
-            artifact.code,
+            this.stagedCode ?? artifact.code,
             artifact.frontmatter.language,
         );
+    }
+
+    /**
+     * Pushes the stored variables-section height into the pane.
+     *
+     * Sent as a message rather than baked into the HTML so the renderers stay
+     * free of configuration reads — the same reason the width probe is a
+     * message. `varsHeightCss` is the one place a fraction becomes a CSS value.
+     */
+    private postVarsHeight(): void {
+        this.postToWebview({ command: 'setVarsHeight', value: varsHeightCss(getVariablesHeightFraction()) });
+    }
+
+    /**
+     * Persists a height the user dragged to.
+     *
+     * The webview sends a raw fraction it computed from a pointer position;
+     * `setVariablesHeightFraction` clamps it, so an out-of-range drag settles
+     * to the default rather than storing a pane-swallowing value. The clamped
+     * result is echoed back so the pane shows what was actually stored.
+     *
+     * @param msg - Webview message carrying `fraction`.
+     */
+    private async handleVarsHeightChanged(msg: Record<string, unknown>): Promise<void> {
+        await setVariablesHeightFraction(msg.fraction);
+        this.postVarsHeight();
+    }
+
+    /**
+     * Records a staged edit and reflects it in the pane.
+     *
+     * @param code - The new block text.
+     */
+    private stageCode(code: string): void {
+        this.stagedCode = code;
+        this.postToWebview({ command: 'codeStaged', code });
+    }
+
+    /**
+     * Makes the staged edit permanent, behind a confirmation.
+     *
+     * The write itself is `persistBlockCode` — the one place block code is
+     * patched into a `.md` — so this method only owns the confirmation and the
+     * post-write refresh.
+     *
+     * @param msg - Webview message carrying the current `code`.
+     */
+    private async handleOverwrite(msg: Record<string, unknown>): Promise<void> {
+        const artifact = this.currentArtifact;
+        if (!artifact) { return; }
+        const code = typeof msg.code === 'string' ? msg.code : this.stagedCode;
+        if (typeof code !== 'string') { return; }
+
+        const name = artifact.relativePath || artifact.fileName;
+        const ok = await confirmModal({
+            message: `Overwrite "${name}" with these changes?`,
+            detail:  'The edited block replaces what is currently in the .md file.',
+            action:  'Overwrite',
+        });
+        if (!ok) { return; }
+
+        const sourceUri = vscode.Uri.file(artifact.filePath);
+        const updated = await persistBlockCode({
+            sourceUri,
+            blockRef: this.currentBlockRef,
+            newCode:  code,
+            rootFs:   this.cb.rootFs,
+        });
+        if (!updated) {
+            vscode.window.showErrorMessage('Could not write the changes — the block was not found in the file.');
+            return;
+        }
+
+        this.cb.setCache(sourceUri, updated);
+        this.stagedCode = undefined;
+        this.postToWebview({ command: 'overwriteDone' });
+        out.appendLine(`[pane] overwrite → ${artifact.fileName}`);
     }
 
     private async handleSaveSection(msg: Record<string, unknown>): Promise<void> {
@@ -376,7 +560,6 @@ export class PreviewPanelController {
 
         void performInsert(this.cb.targetEditor, { ...artifact, code }, resolvedVars, this.cb.invocationSurface);
         this.fullEdit.teardown();
-        void this.blockEdit.teardown();
         this.dispose();
         this.cb.closePicker();
     }

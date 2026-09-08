@@ -572,6 +572,20 @@
           "type": "boolean",
           "default": false,
           "description": "Enable the Variables directory (appears in all context menus)."
+        },
+        "obsidianArtifacts.mainPane.previewWidthSteps": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "maximum": 20,
+          "description": "How far the sidebar widens when a preview opens, counted in widen steps. This is a step count and not a width because VS Code exposes no API to set or read a view's width — the same number of narrow steps is applied when the preview ends, which restores the previous width without ever reading it. Set 0 to disable the resize."
+        },
+        "obsidianArtifacts.mainPane.variablesHeightFraction": {
+          "type": "number",
+          "default": 0.1667,
+          "minimum": 0.05,
+          "maximum": 0.5,
+          "description": "Height of the preview's variables section as a fraction of the pane height (default 0.1667 — one sixth). Minimum 0.05, maximum 0.5. Dragging the section's resize handle updates this value."
         }
       }
     }

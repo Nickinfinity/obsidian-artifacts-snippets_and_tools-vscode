@@ -204,8 +204,7 @@
 
 .reorder-btn,
 .remove-block-btn,
-.expand-btn,
-.expand-editor-btn {
+.expand-btn {
   background: transparent;
   border: 1px solid var(--vscode-widget-border, #444);
   color: var(--vscode-foreground);
@@ -218,8 +217,7 @@
 
 .reorder-btn:hover:not(:disabled),
 .remove-block-btn:hover,
-.expand-btn:hover,
-.expand-editor-btn:hover {
+.expand-btn:hover {
   background-color: var(--vscode-toolbar-hoverBackground, rgba(255, 255, 255, 0.08));
 }
 

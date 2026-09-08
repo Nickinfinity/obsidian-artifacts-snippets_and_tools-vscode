@@ -4,7 +4,14 @@ import { getNonce } from '../../utils/helpers.js';
 import { styleLinkTags } from '../../utils/html.js';
 import { validateObsidianVault, detectVaultDirs, createVaultDirectory, deleteVaultDirectory, isDirectoryEmpty } from '../../services/vault.service.js';
 import { refreshVaultContext } from '../../services/context.service.js';
-import { CONFIG_SECTION, getVaultPath } from '../../services/config.service.js';
+import { CONFIG_SECTION, getVaultPath, getPreviewWidthSteps, getVariablesHeightFraction } from '../../services/config.service.js';
+import {
+	MAIN_PANE_KEYS,
+	MAIN_PANE_SECTION_HTML,
+	MAIN_PANE_SECTION_CSS,
+	MAIN_PANE_CLIENT_JS,
+	isMainPaneKey,
+} from './settings.panel.helpers.js';
 
 /**
  * Opens the configuration panel webview where users can:
@@ -49,6 +56,9 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 			const detectedDirs = detectVaultDirs(savedPath);
 			panel.webview.postMessage({ command: 'updatePath', path: savedPath, dirs: detectedDirs });
 		}
+		// Unconditional: the pane settings have defaults and apply with or
+		// without a vault, so they must seed even on a first, vault-less open.
+		postMainPaneConfig(panel);
 	}
 
 	// Re-hydrate the webview whenever it becomes visible (tab switch or initial focus)
@@ -59,9 +69,99 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 	});
 
 	// Listen for messages from the webview (user interactions)
+	// Thin dispatcher: each branch's body lives in its own module-scope handler
+	// so this function stays inside the cognitive-complexity budget as the
+	// panel grows. Add a new message by adding a handler, not a nested block.
 	panel.webview.onDidReceiveMessage(async (message) => {
-		// HANDLER: User clicked "Select Vault Folder" button
-		if (message.command === 'selectFolder') {
+		if      (message.command === 'selectFolder')  { await handleSelectFolder(panel); }
+		else if (message.command === 'dirToggle')     { await handleDirToggle(panel, message); }
+		else if (message.command === 'setMainPane')   { await handleSetMainPane(panel, message); }
+		else if (message.command === 'resetMainPane') { await handleResetMainPane(panel); }
+	});
+
+	// Send the initial saved config once the panel is open
+	postCurrentConfig();
+}
+
+/**
+ * Persists a Preview Pane setting from the webview.
+ *
+ * The key is narrowed against `MAIN_PANE_KEYS` before it reaches
+ * `update()` — a webview message is untrusted input, and this panel is the
+ * only writer of the config section, so an unchecked key here would let the
+ * webview write anywhere in it.
+ *
+ * @param panel   - The settings panel, echoed back the stored values.
+ * @param message - Raw webview message carrying `key` and numeric `value`.
+ * @returns Resolves once the setting is written and echoed back.
+ *
+ * @example
+ * await handleSetMainPane(panel, { key: 'mainPane.previewWidthSteps', value: 5 });
+ */
+async function handleSetMainPane(panel: vscode.WebviewPanel, message: Record<string, unknown>): Promise<void> {
+	const key = message.key;
+	const value = message.value;
+	if (!isMainPaneKey(key) || typeof value !== 'number' || !Number.isFinite(value)) { return; }
+
+	await vscode.workspace
+		.getConfiguration(CONFIG_SECTION)
+		.update(key, value, vscode.ConfigurationTarget.Global);
+
+	postMainPaneConfig(panel);
+}
+
+/**
+ * Clears both Preview Pane overrides so the manifest defaults apply again.
+ *
+ * Writes `undefined`, which *removes* the override rather than storing a
+ * literal — storing the current default would silently pin the value if the
+ * shipped default ever changed.
+ *
+ * @param panel - The settings panel, echoed the restored defaults.
+ * @returns Resolves once both keys are cleared.
+ *
+ * @example
+ * await handleResetMainPane(panel);
+ */
+async function handleResetMainPane(panel: vscode.WebviewPanel): Promise<void> {
+	const config = vscode.workspace.getConfiguration(CONFIG_SECTION);
+	for (const key of MAIN_PANE_KEYS) {
+		await config.update(key, undefined, vscode.ConfigurationTarget.Global);
+	}
+	postMainPaneConfig(panel);
+	vscode.window.showInformationMessage('Preview pane settings reset to defaults.');
+}
+
+/**
+ * Sends the effective Preview Pane values to the webview.
+ *
+ * Read through `config.service`'s accessors, so what the panel displays is
+ * the value the extension will actually use — already normalised and
+ * bounds-checked, not the raw stored text.
+ *
+ * @param panel - Panel to post to.
+ *
+ * @example
+ * postMainPaneConfig(panel);
+ */
+function postMainPaneConfig(panel: vscode.WebviewPanel): void {
+	panel.webview.postMessage({
+		command: 'updateMainPane',
+		widthSteps: getPreviewWidthSteps(),
+		varsFraction: getVariablesHeightFraction(),
+	});
+}
+
+/**
+ * Handles the "Select Vault Folder" button.
+ *
+ * @param panel - Panel to post the new vault state back to.
+ * @returns Resolves once the vault is validated, stored and echoed back.
+ *
+ * @example
+ * await handleSelectFolder(panel);
+ */
+async function handleSelectFolder(panel: vscode.WebviewPanel): Promise<void> {
 			// Show native file picker dialog — users can only select folders, not files
 			const folderUri = await vscode.window.showOpenDialog({
 				canSelectFiles: false,
@@ -94,9 +194,19 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 			} else {
 				vscode.window.showWarningMessage('No folder selected.');
 			}
-		}
-		// HANDLER: User toggled a vault directory checkbox
-		else if (message.command === 'dirToggle') {
+}
+
+/**
+ * Handles a vault-directory checkbox toggle.
+ *
+ * @param panel   - Panel to post the refreshed directory status back to.
+ * @param message - Raw webview message carrying `vaultPath`, `dirName`, `isChecked`.
+ * @returns Resolves once the directory and its feature flag are in sync.
+ *
+ * @example
+ * await handleDirToggle(panel, { vaultPath: '/v', dirName: 'Snippets', isChecked: true });
+ */
+async function handleDirToggle(panel: vscode.WebviewPanel, message: Record<string, unknown>): Promise<void> {
 			const vaultPath = message.vaultPath as string;
 			const dirName  = message.dirName  as string;
 			const isChecked = message.isChecked as boolean;
@@ -132,11 +242,6 @@ export function openSettingsPanel(context: vscode.ExtensionContext) {
 			refreshVaultContext();
 			const updatedDirs = detectVaultDirs(vaultPath);
 			panel.webview.postMessage({ command: 'updateDirs', dirs: updatedDirs });
-		}
-	});
-
-	// Send the initial saved config once the panel is open
-	postCurrentConfig();
 }
 
 /**
@@ -179,9 +284,11 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <!-- Content Security Policy: inline scripts only allowed with matching nonce, styles from webview host -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource};">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'nonce-${nonce}'; style-src ${webview.cspSource} 'nonce-${nonce}';">
   <!-- Load external stylesheet from extension src/ui folder -->
   ${styleTags}
+  <!-- Section-local styles; nonce-matched, which is why style-src carries the nonce too -->
+  <style nonce="${nonce}">${MAIN_PANE_SECTION_CSS}</style>
   <title>Obsidian Artifacts: AI Snippets & Tools - CONFIG</title>
 </head>
 <body class="settings-body">
@@ -223,7 +330,7 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
         <span>Select Vault Folder</span>
       </button>
     </div>
-
+${MAIN_PANE_SECTION_HTML}
   </div>
 
   <!-- Main webview script with nonce for security -->
@@ -239,10 +346,15 @@ function getWebviewContent(webview: vscode.Webview, extensionUri: vscode.Uri) {
     });
 
     // LISTENER: Messages from extension (vault updates, directory status changes)
+${MAIN_PANE_CLIENT_JS}
+
     window.addEventListener('message', (event) => {
       const message = event.data;
 
-      if (message.command === 'updatePath') {
+      if (message.command === 'updateMainPane') {
+        applyMainPaneConfig(message);
+      }
+      else if (message.command === 'updatePath') {
         // Vault path was selected: update UI with vault path and directory status
         currentVaultPath = message.path;
         const el = document.getElementById('folderPath');

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { registerOpenSettingsCommand } from './commands/openSettings.command.js';
 import { registerInsertCommands } from './commands/insert.command.js';
+import { registerEditArtifactCommand } from './commands/editArtifact.command.js';
 import { registerMigrateCommand } from './commands/migrate.command.js';
 import { refreshVaultContext } from './services/context.service.js';
 import { createVaultDirectory } from './services/vault.service.js';
@@ -29,6 +30,7 @@ export async function activate(context: vscode.ExtensionContext) {
 	registerInsertCommands(context);
 	registerCreateSurfaceCommands(context);
 	registerMigrateCommand(context);
+	context.subscriptions.push(registerEditArtifactCommand(context));
 
 	// The main pane. Registered without a `when` on the view itself (package.json):
 	// a view that fails its `when` is dropped, and a container whose views are all
