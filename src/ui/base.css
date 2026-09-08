@@ -30,3 +30,24 @@ button {
 button:hover {
   background-color: var(--vscode-button-hoverBackground);
 }
+
+/* Expand-to-editor button.
+   Lives here, not in `form.css`, because both the create/edit form and the
+   preview pane render this control and only `base.css` is loaded by both —
+   a second copy in `code-block.css` is exactly the drift that leaves the two
+   surfaces looking subtly different. `form.css` keeps only its own
+   card-relative positioning. */
+.expand-editor-btn {
+  background: transparent;
+  border: 1px solid var(--vscode-widget-border, var(--vscode-panel-border));
+  color: var(--vscode-foreground);
+  border-radius: 3px;
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1.2;
+}
+
+.expand-editor-btn:hover {
+  background-color: var(--vscode-toolbar-hoverBackground, transparent);
+}

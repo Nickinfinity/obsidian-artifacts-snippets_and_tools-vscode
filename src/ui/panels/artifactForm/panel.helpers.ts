@@ -1,3 +1,6 @@
+import * as vscode from 'vscode';
+import * as path from 'node:path';
+import { confirmModal } from '../../../services/confirm.service.js';
 import type { ArtifactFormBlock, ArtifactFormModel } from '../../../types/artifact-form.types.js';
 import type { ParsedVar } from '../../../types/parsed-artifact.types.js';
 
@@ -129,4 +132,65 @@ export function reorderBlocks(blocks: ArtifactFormBlock[], fromIdx: number, toId
         copy[toIdx]   = a;
     }
     return copy;
+}
+
+/**
+ * Confirms deleting an artifact file from the vault.
+ *
+ * Names the file explicitly and says where it goes: a modal that says only
+ * "are you sure?" gives the user nothing to check the action against, and this
+ * one removes a file from their vault.
+ *
+ * @param uri - File that would be deleted.
+ * @returns `true` only if the user chose Delete; Cancel and Escape are both `false`.
+ *
+ * @example
+ * if (await confirmDeleteFile(uri)) { await deleteArtifactFile(uri); }
+ */
+export async function confirmDeleteFile(uri: vscode.Uri): Promise<boolean> {
+    return confirmModal({
+        message: `Delete "${path.basename(uri.fsPath)}"?`,
+        detail:  'The file is moved to the trash and can be restored from there.',
+        action:  'Delete',
+    });
+}
+
+/**
+ * Confirms discarding an unsaved draft — create mode, where no file exists yet.
+ *
+ * @param singular - Human noun for the artifact type, e.g. `'snippet'`.
+ * @returns `true` only if the user chose Discard.
+ *
+ * @example
+ * if (await confirmDiscardDraft('snippet')) { panel.dispose(); }
+ */
+export async function confirmDiscardDraft(singular: string): Promise<boolean> {
+    return confirmModal({
+        message: `Discard this ${singular}?`,
+        detail:  'It has not been saved, so nothing is written to the vault.',
+        action:  'Discard',
+    });
+}
+
+/**
+ * Deletes an artifact file to the OS trash.
+ *
+ * `useTrash` keeps the delete recoverable — the vault is the user's own notes,
+ * and an unrecoverable unlink is not a reasonable default for a button click.
+ *
+ * @param uri - File to delete.
+ * @returns `true` on success; `false` after showing the error, so the caller
+ *          can leave the form open rather than closing over a failed delete.
+ *
+ * @example
+ * if (!await deleteArtifactFile(uri)) { return; }
+ */
+export async function deleteArtifactFile(uri: vscode.Uri): Promise<boolean> {
+    try {
+        await vscode.workspace.fs.delete(uri, { useTrash: true });
+        return true;
+    } catch (err) {
+        vscode.window.showErrorMessage(`Could not delete artifact: ${(err as Error).message}`);
+        return false;
+    }
 }

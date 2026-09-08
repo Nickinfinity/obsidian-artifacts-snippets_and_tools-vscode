@@ -15,9 +15,16 @@
   </div>
   <p class="desc">A demo artifact for golden tests.</p>
   <div class="tags"><span class="tag">demo</span><span class="tag">golden</span></div>
+  <div class="dirty-notice" id="dirtyNotice" hidden>
+    Temporary changes — they affect this insert only. Click Overwrite to save them to the <code>.md</code>.
+  </div>
   
-  <div class="slabel">Content <span class="slabel-hint">— editable, not saved to .md</span></div>
-  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false" data-lang="javascript"><div class="code-line-row"><span class="line-number" contenteditable="false">1</span><span class="code-content"><span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="vk-var">&lt;VK-msg&gt;</span>);</span></div></div>
+  <div class="code-toolbar">
+    <button class="expand-editor-btn" id="expandCodeBtn" title="Open this block in the editor"
+            aria-label="Open this block in the editor">⤢</button>
+  </div>
+  <div id="codeWrapper" class="code-block-wrapper editable" contenteditable="true" spellcheck="false"
+       style="--oa-code-min-lines: 8" data-lang="javascript"><div class="code-line-row"><span class="line-number" contenteditable="false">1</span><span class="code-content"><span class="hljs-variable language_">console</span>.<span class="hljs-title function_">log</span>(<span class="vk-var">&lt;VK-msg&gt;</span>);</span></div></div>
   <div class="slabel">Variables</div>
   <div id="varsSection">
     <div class="inputs" id="varInputs">
@@ -32,11 +39,13 @@
       <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
     </div>
   </div>
+  <div class="vars-resize-handle" id="varsResizeHandle" role="separator" aria-orientation="horizontal"
+       aria-label="Resize the variables section" tabindex="0"></div>
   <div class="actions">
     <button class="btn btn-insert"    id="insertBtn">Insert</button>
     <button class="btn btn-secondary" id="copyBtn">Copy</button>
-    <button class="btn btn-secondary" id="editBlockBtn">Edit Block</button>
-    <button class="btn btn-secondary" id="editBtn">Edit .md</button>
+    <button class="btn btn-secondary" id="overwriteBtn" hidden>Overwrite</button>
+    <button class="btn btn-secondary" id="editBtn">Edit</button>
     <button class="btn btn-cancel"    id="cancelBtn">Cancel</button>
   </div>
   <p class="path">demo.md</p>
@@ -186,12 +195,42 @@
     window.__codeBlock.flushPendingRender();
     vscode.postMessage({ command: 'copy', vars: collectVars(), code: window.__codeBlock.extractCode() });
   });
-  document.getElementById('editBlockBtn').addEventListener('click', function () {
-    vscode.postMessage({ command: 'editBlock' });
-  });
   document.getElementById('editBtn').addEventListener('click', function () {
     vscode.postMessage({ command: 'fullEdit' });
   });
+
+  // ── Staged-edit state ────────────────────────────────────────────────────
+  // Editing here changes only what gets inserted; the .md is untouched until
+  // Overwrite. Both editing surfaces (this code area and the expanded editor)
+  // funnel through markStaged so the notice cannot appear for one and not the
+  // other.
+  const dirtyNotice  = document.getElementById('dirtyNotice');
+  const overwriteBtn = document.getElementById('overwriteBtn');
+
+  function markStaged() {
+    if (dirtyNotice)  { dirtyNotice.hidden  = false; }
+    if (overwriteBtn) { overwriteBtn.hidden = false; }
+  }
+  function clearStaged() {
+    if (dirtyNotice)  { dirtyNotice.hidden  = true; }
+    if (overwriteBtn) { overwriteBtn.hidden = true; }
+  }
+
+  const codeArea = document.getElementById('codeWrapper');
+  if (codeArea) { codeArea.addEventListener('input', markStaged); }
+
+  const expandBtn = document.getElementById('expandCodeBtn');
+  if (expandBtn) {
+    expandBtn.addEventListener('click', function () {
+      vscode.postMessage({ command: 'editBlock' });
+    });
+  }
+  if (overwriteBtn) {
+    overwriteBtn.addEventListener('click', function () {
+      window.__codeBlock.flushPendingRender();
+      vscode.postMessage({ command: 'overwrite', code: window.__codeBlock.extractCode() });
+    });
+  }
   document.getElementById('cancelBtn').addEventListener('click', function () {
     vscode.postMessage({ command: 'cancel' });
   });
@@ -202,8 +241,46 @@
     }
   });
 
-  // ── Variable-set buttons ─────────────────────────────────────────────────
   const varsSection = document.getElementById('varsSection');
+
+  // ── Variables-section resize ─────────────────────────────────────────────
+  // The extension cannot read this pane's size, so the drag is resolved here:
+  // pointer position becomes a fraction of the pane, applied locally for
+  // instant feedback and posted once on release. The extension clamps and
+  // persists it — this side never decides what is in range.
+  const varsResizeHandle = document.getElementById('varsResizeHandle');
+  if (varsResizeHandle && varsSection) {
+    let dragging = false;
+
+    function fractionFromPointer(clientY) {
+      const top = varsSection.getBoundingClientRect().top;
+      const paneHeight = window.innerHeight || 1;
+      return (clientY - top) / paneHeight;
+    }
+
+    function applyLocal(fraction) {
+      // Local feedback only; the authoritative bounds live in the extension.
+      document.documentElement.style.setProperty('--oa-vars-height', (fraction * 100) + 'vh');
+    }
+
+    varsResizeHandle.addEventListener('pointerdown', function (ev) {
+      dragging = true;
+      varsResizeHandle.setPointerCapture(ev.pointerId);
+      ev.preventDefault();
+    });
+    varsResizeHandle.addEventListener('pointermove', function (ev) {
+      if (!dragging) { return; }
+      applyLocal(fractionFromPointer(ev.clientY));
+    });
+    varsResizeHandle.addEventListener('pointerup', function (ev) {
+      if (!dragging) { return; }
+      dragging = false;
+      varsResizeHandle.releasePointerCapture(ev.pointerId);
+      vscode.postMessage({ command: 'varsHeightChanged', fraction: fractionFromPointer(ev.clientY) });
+    });
+  }
+
+  // ── Variable-set buttons ─────────────────────────────────────────────────
   let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
 
   function refreshSaveBtn() {
@@ -305,6 +382,26 @@
     if (msg.command === 'showVarSetDiff') { showDiffView(msg.html); }
     if (msg.command === 'varSetApplied')  { applyValuesAndBadges(msg.values || {}, msg.subSetName || '', msg.varNames || []); }
     if (msg.command === 'varSetCancelled'){ restoreVarsView(); }
+    // Saved in the expanded editor: same staged state as typing here.
+    if (msg.command === 'codeStaged') {
+      window.__codeBlock.setCode(msg.code || '');
+      markStaged();
+    }
+    if (msg.command === 'overwriteDone') { clearStaged(); }
+    // Authoritative height from the extension (config, already clamped).
+    if (msg.command === 'setVarsHeight' && msg.value) {
+      document.documentElement.style.setProperty('--oa-vars-height', msg.value);
+    }
+    // The extension host cannot read this pane's width — no such member exists
+    // on WebviewView. The webview can: it is a real DOM. Reported back so the
+    // widen loop can stop at a target instead of stepping blind.
+    if (msg.command === 'measurePane') {
+      vscode.postMessage({
+        command: 'paneMetrics',
+        paneWidth: window.innerWidth,
+        availWidth: window.screen ? window.screen.availWidth : 0,
+      });
+    }
   });
 
 })();

@@ -1,0 +1,77 @@
+/*
+ * Narrow-pane overrides for the sidebar preview (T22, VSX-223).
+ *
+ * A sidebar pane is ~300px wide against an editor column's ~800px.
+ * `picker.css` and `code-block.css` already carry the base rules (colours,
+ * spacing, the code area itself); this sheet adds only what the narrow
+ * width needs on top of them, so it must load after both.
+ *
+ * No overflow rule here by design: `code-block.css` sets
+ * `.code-block-wrapper { overflow-y: auto }`, and per CSS Overflow 3 a
+ * computed `visible` on one axis alongside `auto` on the other computes to
+ * `auto` — so `overflow-x` is already `auto` before this sheet loads.
+ * `.code-content` is also `pre-wrap` + `break-all`, so horizontal overflow
+ * is unreachable at any width regardless.
+ */
+
+.popup-body {
+  padding: 12px 14px 18px;
+}
+
+.input-row {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+}
+
+.input-row label {
+  min-width: 0;
+}
+
+/*
+ * T1 (VSX-235 / VSX-236 CSS half): the width can never be read back (see
+ * CLAUDE.md §1), so the action row wraps instead of assuming a breakpoint —
+ * several buttons per line where width allows, one per line only once it
+ * genuinely runs out. `min-width` is what keeps a button readable instead of
+ * being squeezed to nothing as it wraps.
+ */
+.actions {
+  flex-wrap: wrap;
+}
+
+.btn {
+  flex: 0 1 auto;
+  min-width: 110px;
+}
+
+/*
+ * Height-bounded so the action row below it stays reachable no matter how
+ * many <VK-xxx> vars an artifact declares. `--oa-vars-height` is the hook
+ * T2's drag handle writes to at runtime; this sheet only owns the fallback.
+ */
+#varsSection {
+  max-height: var(--oa-vars-height, calc(100vh / 6));
+  overflow-y: auto;
+}
+
+/*
+ * Drag handle for the variables section. The pane cannot report its own height
+ * to the extension, so the drag converts a pointer position into a *fraction*
+ * of the pane and writes `--oa-vars-height` locally; the extension only ever
+ * sees that fraction (clamped by `pane-layout.service`).
+ */
+.vars-resize-handle {
+  height: 6px;
+  margin: 2px 0 8px;
+  border-radius: 3px;
+  cursor: ns-resize;
+  background: var(--vscode-widget-border, var(--vscode-panel-border));
+  opacity: 0.6;
+}
+
+.vars-resize-handle:hover,
+.vars-resize-handle:focus {
+  opacity: 1;
+  background: var(--vscode-focusBorder);
+  outline: none;
+}

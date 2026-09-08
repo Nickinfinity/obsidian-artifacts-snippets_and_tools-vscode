@@ -42,6 +42,7 @@ export const ARTIFACTS: ArtifactsArray = [
 		// Invoking an agent config writes the whole file (named from `target:`),
 		// exactly like a template — same flag, one shared code path.
 		writesFile: true,
+		outputNameKey: 'target',
 		// D4: agent reuses the multi-block form machinery (matches ARTIFACT_FILE_FORMAT.md §5).
 		// `free` language mirrors snippet/template; provider/model/version are agent-only
 		// frontmatter keys rendered by buildAgentFieldsSection, not a language concern.
@@ -75,6 +76,7 @@ export const ARTIFACTS: ArtifactsArray = [
 		contexts: ['explorer'],
 		createForm: true,
 		writesFile: true,
+		outputNameKey: 'extension',
 		form: {
 			language: { mode: 'free', default: '' },
 			label: { singular: 'template' },
@@ -235,3 +237,29 @@ export const LANG_EXT: Record<string, string> = {
 	dockerfile: 'dockerfile',
 	plaintext: 'txt',
 };
+
+/**
+ * Widest the main pane is grown to when a preview opens, in CSS px.
+ *
+ * The pane targets a third of `screen.availWidth`, capped here: on a wide or
+ * high-resolution display a literal third is far more pane than the preview
+ * needs, and the code area stops gaining anything past this width.
+ *
+ * @example
+ * Math.min(availWidth / 3, MAX_PANE_WIDTH_PX);
+ */
+export const MAX_PANE_WIDTH_PX = 700;
+
+/**
+ * Minimum height of the preview's editable code area, in lines.
+ *
+ * A short artifact would otherwise render a two-line sliver that is awkward to
+ * edit in. Applied as a CSS custom property rather than a hard-coded rule
+ * (`code-block.css` reads `--oa-code-min-lines`), because a stylesheet cannot
+ * import a constant and a second spelling of the number is exactly the drift
+ * this repo keeps writing guard tests about.
+ *
+ * @example
+ * `style="--oa-code-min-lines: ${CODE_BLOCK_MIN_LINES}"`
+ */
+export const CODE_BLOCK_MIN_LINES = 8;

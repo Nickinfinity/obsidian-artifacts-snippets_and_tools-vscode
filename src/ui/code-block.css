@@ -1,13 +1,24 @@
 .code-block-wrapper {
   overflow-y: auto;
-  max-height: 400px;
+  max-height: 70vh;
+  /* Explicit so the line minimum below is arithmetic, not a guess about
+     whatever line-height the host stylesheet happens to inherit. */
+  line-height: 1.5;
   border-radius: 4px;
   font-family: var(--vscode-editor-font-family);
   font-size: var(--vscode-editor-font-size);
 }
 
 .code-block-wrapper.editable {
-  background: var(--vscode-textCodeBlock-background, var(--vscode-editor-background));
+  /* The editor's own background, not the lighter inline-code tint: this is a
+     code surface the user types into, so it should read as an editor. */
+  background: var(--vscode-editor-background);
+  /* A workable minimum editing area for a short snippet, instead of a
+     two-line sliver. The line count comes from CODE_BLOCK_MIN_LINES via the
+     custom property `buildCodeBlockHtml` sets — the fallback here only applies
+     if that property is ever missing. `min-height` beats `max-height` in CSS,
+     so this wins on a small artifact and the max still caps a long one. */
+  min-height: calc(var(--oa-code-min-lines, 8) * 1.5em);
   border: 1px solid var(--vscode-panel-border);
   padding: 6px 0;
   outline: none;
@@ -51,4 +62,26 @@
   background: rgba(232, 166, 74, 0.12);
   border-radius: 3px;
   padding: 0 2px;
+}
+
+/* Toolbar strip above the editable code area. Right-aligned so the maximize
+   control sits over the code's top-right corner the way the form's does,
+   without needing the form's absolute positioning (there is no card here to
+   position against). */
+.code-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 4px;
+}
+
+/* Unsaved-edit notice. Uses the editor's own warning/notification tokens so it
+   reads as an inline status line rather than an error. */
+.dirty-notice {
+  margin: 0 0 8px;
+  padding: 6px 8px;
+  border-left: 3px solid var(--vscode-editorWarning-foreground, var(--vscode-focusBorder));
+  background: var(--vscode-inputValidation-warningBackground, transparent);
+  color: var(--vscode-foreground);
+  font-size: 0.85rem;
+  line-height: 1.4;
 }
