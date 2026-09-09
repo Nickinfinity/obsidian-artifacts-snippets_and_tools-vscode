@@ -64,10 +64,15 @@ stale. `CLAUDE.md`'s standing rule applies — **trust the tree over any plan or
 
 ## 2. Agent topology
 
-Three roles: one **orchestrator** (Opus — senior TypeScript tech lead + project manager), one
-**reviewer** (Opus — senior TypeScript tech lead, review only), N **workers** (Sonnet) in
-parallel. Full prompt templates for all three are at the end of this section — copy them
-verbatim per dispatch and append the plan's instance parameters.
+Three roles **run** a plan: one **orchestrator** (Opus — senior TypeScript tech lead +
+project manager), one **reviewer** (Opus — senior TypeScript tech lead, review only), N
+**workers** (Sonnet) in parallel. Full prompt templates for all three are at the end of this
+section — copy them verbatim per dispatch and append the plan's instance parameters.
+
+Two further roles **refine** a plan before any of that starts — the *Loopholes and Details
+Fixer* and the *Tasks Optimizer and Resource Finder*, both Opus, both read-and-report. They
+belong to authoring, not execution, and they are specified in **§5.3**. A plan that has not
+been through them is not runnable, however finished it looks.
 
 ### 2.0 Prompt composition — three blocks, written once each
 
@@ -565,6 +570,126 @@ process to find three prompts.
 
 ---
 
+## 5.3 Refinement waves — a plan is not finished when it is written
+
+**Authoring has two phases: *drafting* and *refinement*.** A freshly drafted plan reads as
+complete and is not: its `Signatures` blocks are claims about a tree nobody re-checked, its
+`Test first` fields are assertions nobody compiled, and its tasks name files the author
+believed were the right ones. Refinement is what turns a plausible plan into a dispatchable
+one, and it costs a fraction of what a wave of workers costs when it is skipped.
+
+Refinement runs **per wave**, in **waves of its own**, with the same stop-and-ask discipline
+execution has.
+
+### 5.3.1 The two roles
+
+Both are **Opus**. Both are **read-and-report: neither ever edits a file.** The plan is
+single-writer — the authoring session applies every accepted finding — for exactly the reason
+the ledger is: two writers on one document race, and a gitignored `docs/` has no diff to catch
+it.
+
+| Role | Runs | Answers |
+|---|---|---|
+| **A — Loopholes and Details Fixer** | first, and again last | "Could a cold worker read this two ways? Would this wave, done exactly as written, actually meet its goal? Is every claim about the tree true?" |
+| **B — Tasks Optimizer and Resource Finder** | between A's two passes | "What exactly does each task touch, what already exists that it must reuse, and what will its change break?" |
+
+**Role A — Loopholes and Details Fixer.** Checks, in order: goal reachability (does any part
+of the wave's `Definition of done` have no task delivering it?); ambiguity (quote the sentence,
+give both readings, say which is meant); **claims about the tree** — every signature, path,
+line number and quoted assertion verified against the actual repository, because *a `Test
+first` assertion that cannot compile is a plan bug, not a worker's problem*; tautological
+tests; disjointness across the wave including test files, fixtures, goldens and `package.json`;
+same-wave dependencies; missing guards; security markings and whether their hostile-input
+assertions name the **sink**. It ends with a `QUESTIONS` block — each question carrying a
+recommended default so the human confirms rather than composes — and a verdict of `READY` or
+`NOT READY`.
+
+**Role B — Tasks Optimizer and Resource Finder. This role specialises in TDD and DRY, and
+those two are its whole lens.**
+
+- **TDD — the test comes first, and the plan must make that the only possible reading.** For
+  every task, Role B checks that the work of *writing or updating the test* is ordered
+  **before** the implementation, explicitly, in the task's own text — not implied by a `Test
+  first` field the worker might read after starting. Where a task updates an existing test
+  rather than adding one, the plan must say which file, which assertion, and that the update
+  lands and goes red *before* the source changes. Where a task's first assertion cannot fail
+  against an empty implementation, Role B rejects it and says what would make it fail. Where a
+  wave's tasks have an ordering between test work and source work that the wave table does not
+  show, Role B surfaces it.
+- **DRY — every task names what it reuses before it is allowed to write anything.** For each
+  task, Role B finds and names the existing component, helper, table, type, service or pattern
+  the task must extend, with its path, and flags any task that would produce a sibling of
+  something already in the tree. A task proposing a new authority must either name the
+  existing one it extends instead, or carry an explicit statement that none exists. This is
+  the check that stops five tasks in one plan each writing their own path-containment guard,
+  their own escaper, or their own emitter.
+
+Alongside those two, Role B produces per task: the **file ledger** (create / modify /
+read-only, full paths); the **real signatures**, copied verbatim from the tree with
+`file:line`, for every existing symbol the task will call; the **blast radius** — every test,
+snapshot, golden and guard the change will turn red, and whether that is expected; and **the
+trap**, the one mistake a competent worker is most likely to make on this task given how the
+repo is shaped. It **does not** redesign the wave, change goals, or add scope: it sharpens
+directions, it does not change what is being built.
+
+### 5.3.2 The cycle, per wave
+
+```
+drafted ──▶ A (loopholes) ──▶ author applies + human answers QUESTIONS
+                                        │
+                                        ▼
+                          B (TDD + DRY, resources, signatures)
+                                        │
+                                        ▼
+                      author pastes the ledgers and signatures in
+                                        │
+                                        ▼
+                    A again (verifies nothing was loosened)
+                                        │
+                                        ▼
+                                     ready
+```
+
+**A's second pass is not a formality.** B adds real signatures and explicit file lists, and
+adding detail is precisely when a task quietly grows a second owner or a fifth owned file. The
+second pass re-checks disjointness and sizing against the *new* text.
+
+Refining just ahead of execution is cheaper than refining everything up front: earlier waves
+change the tree that later waves' signatures describe.
+
+### 5.3.3 Human-triggered, agent-requested
+
+**Refinement passes are triggered by the human, and asked for by the authoring agent.** The
+same rule execution waves follow, for the same reason.
+
+The authoring agent, on finishing a draft or on finishing an application of findings,
+**stops** and asks for the next pass by name and scope — "Wave 2 is drafted; run Loopholes
+pass 1 on it?" It does **not** spawn a refinement agent on its own initiative, does not chain
+A → B → A without stopping between, and does not begin execution because refinement came back
+`READY`. `READY` reports that a wave is *runnable*; the human says when it *runs*.
+
+### 5.3.4 The refinement status table is a dispatch gate
+
+Every plan carries this table, and mirrors it into `progress.md` (§7). **No wave is
+dispatchable while its row reads anything but `ready`.**
+
+```markdown
+| Wave | Role A pass 1 | Author applied | Role B | Role A pass 2 | Status |
+|------|---------------|----------------|--------|---------------|--------|
+| W0   | ☐             | ☐              | ☐      | ☐             | unrefined |
+```
+
+Both copies are updated together, under §2's companion-artifact consistency rule.
+
+### 5.3.5 Self-containment applies to these roles too
+
+Both prompt templates are **copied into the plan**, in the same appendix that carries the
+three execution templates (§5.2), each opening with the domain block (§2.1), then the
+discipline block (§2.2), then its role block, then the plan's instance parameters. A plan
+whose refinement roles point back at this file has the same defect §5.2 exists to prevent.
+
+---
+
 ## 6. The gate
 
 Every wave ends with the repo gate:
@@ -668,6 +793,14 @@ Before any agent is dispatched, the plan must satisfy:
 - [ ] Any `.md` artifact format change updates `ARTIFACT_FILE_FORMAT.md` **in the
       same change** — the parser wins when doc and parser disagree, so the doc is the bug.
 - [ ] `progress.md` exists with every task at `todo`.
+- [ ] The plan carries the **refinement status table** (§5.3.4), mirrored into `progress.md`,
+      with every wave at `unrefined` — and states that a wave is not dispatchable until its
+      row reads `ready`.
+- [ ] The plan's execution appendix carries the **two refinement role templates** (§5.3.1)
+      verbatim, alongside the three execution ones, each opened by the domain block.
+- [ ] The plan records that refinement passes are **human-triggered and agent-requested**
+      (§5.3.3) — the authoring agent stops and asks for each pass by name and scope, and
+      never chains A → B → A on its own.
 - [ ] Per-wave commit **and push** is encoded: the orchestrator commits once per wave with the
       affected ticket id(s) leading the subject (`<KEY>` until keys exist), then pushes the
       feature branch. Docs-only changes are exempt from the ticket prefix (§8).
