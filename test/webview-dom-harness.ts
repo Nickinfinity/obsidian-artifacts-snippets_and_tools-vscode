@@ -1,0 +1,380 @@
+import { PREVIEW_CLIENT_JS } from '../src/ui/panels/artifactPicker/preview.clientJs.js';
+
+/**
+ * A minimal DOM emulator for running webview client scripts under Node,
+ * strict enough to see identity bugs that `webview-script-executes.test.ts`
+ * cannot: that suite's stub returns a *fresh* element from every
+ * `getElementById`, so it is structurally blind to an innerHTML-replacement
+ * defect. This one tracks element identity, `innerHTML` as a real
+ * parse/serialize round-trip (ids, `class`, `data-*`, nesting), and event
+ * bubbling — the three things a delegated-listener fix needs to be provable.
+ *
+ * **First non-`.test.ts` file under `test/`.** `tsconfig.json` includes
+ * `test/**\/*`, `.vscode-test.mjs` globs `dist/test/**\/*.test.js` (this file
+ * is imported, never collected as a suite), and `lint: "eslint src"` skips
+ * `test/` entirely.
+ *
+ * Deliberately small: only the selectors and DOM operations the preview and
+ * (later) idle-pane client scripts actually use are supported —
+ * `#id`, `.class`, `[attr]`, `[attr="value"]`. It is not a browser.
+ */
+
+// ── Internal element model ──────────────────────────────────────────────────
+
+/** Void (self-closing, no matching close tag) HTML tags used by the client scripts. */
+const VOID_TAGS = new Set(['input', 'br', 'img', 'hr', 'meta']);
+
+/**
+ * Converts a `dataset` property name to its `data-*` attribute spelling.
+ *
+ * @param prop - camelCase dataset property name (e.g. `varSource`).
+ * @returns kebab-case suffix (e.g. `var-source`).
+ *
+ * @example
+ * kebabCase('varSource'); // → 'var-source'
+ */
+function kebabCase(prop: string): string {
+    return prop.replace(/[A-Z]/g, (c) => `-${c.toLowerCase()}`);
+}
+
+/**
+ * One emulated DOM element. Identity is the object itself — `document.getElementById`
+ * and `querySelector`/`querySelectorAll` all resolve to the *same* instance until an
+ * ancestor's `innerHTML` is reassigned, which drops this subtree and mints new instances.
+ */
+class ElementStub {
+    children: ElementStub[] = [];
+    parentElement: ElementStub | null = null;
+    value: string;
+    textContent = '';
+    hidden = false;
+    checked = false;
+    style: { setProperty: (name: string, val: string) => void; display: string } = {
+        setProperty: () => { /* not asserted */ },
+        display: '',
+    };
+    dataset: Record<string, string>;
+    private readonly eventListeners = new Map<string, Array<(ev: SyntheticEvent) => void>>();
+
+    constructor(
+        public readonly tagName: string,
+        public readonly attrs: Record<string, string>,
+        private readonly registry: Map<string, ElementStub>,
+    ) {
+        this.value = attrs.value ?? '';
+        this.dataset = new Proxy({} as Record<string, string>, {
+            get: (_t, prop: string): string => this.attrs[`data-${kebabCase(prop)}`],
+            set: (_t, prop: string, val: string): boolean => {
+                this.attrs[`data-${kebabCase(prop)}`] = val;
+                return true;
+            },
+        });
+    }
+
+    get id(): string { return this.attrs.id ?? ''; }
+
+    get className(): string { return this.attrs.class ?? ''; }
+    set className(v: string) { this.attrs.class = v; }
+
+    get classList(): { contains(c: string): boolean; add(c: string): void; remove(c: string): void } {
+        const self = this;
+        return {
+            contains: (c) => (self.attrs.class ?? '').split(/\s+/).includes(c),
+            add: (c) => {
+                const set = new Set((self.attrs.class ?? '').split(/\s+/).filter(Boolean));
+                set.add(c);
+                self.attrs.class = [...set].join(' ');
+            },
+            remove: (c) => {
+                self.attrs.class = (self.attrs.class ?? '').split(/\s+/).filter((x) => x !== c).join(' ');
+            },
+        };
+    }
+
+    /** Serializes the live child tree back to markup — the snapshot `showDiffView` takes. */
+    get innerHTML(): string { return serialize(this.children); }
+
+    /** Drops the current subtree (unregistering its ids) and parses fresh, identity-new children. */
+    set innerHTML(html: string) {
+        unregisterSubtree(this.children, this.registry);
+        this.children = parseFragment(html, this, this.registry);
+    }
+
+    addEventListener(type: string, fn: (ev: SyntheticEvent) => void): void {
+        const arr = this.eventListeners.get(type) ?? [];
+        arr.push(fn);
+        this.eventListeners.set(type, arr);
+    }
+    removeEventListener(type: string, fn: (ev: SyntheticEvent) => void): void {
+        const arr = this.eventListeners.get(type);
+        if (!arr) { return; }
+        const i = arr.indexOf(fn);
+        if (i >= 0) { arr.splice(i, 1); }
+    }
+    listenersFor(type: string): Array<(ev: SyntheticEvent) => void> {
+        return this.eventListeners.get(type) ?? [];
+    }
+    appendChild(child: ElementStub): ElementStub {
+        this.children.push(child);
+        child.parentElement = this;
+        if (child.id) { this.registry.set(child.id, child); }
+        return child;
+    }
+    remove(): void {
+        if (this.parentElement) {
+            const idx = this.parentElement.children.indexOf(this);
+            if (idx >= 0) { this.parentElement.children.splice(idx, 1); }
+        }
+        if (this.id && this.registry.get(this.id) === this) { this.registry.delete(this.id); }
+    }
+    closest(sel: string): ElementStub | null {
+        let node: ElementStub | null = this;
+        while (node) {
+            if (matches(node, sel)) { return node; }
+            node = node.parentElement;
+        }
+        return null;
+    }
+    querySelector(sel: string): ElementStub | null { return findFirst(this, sel); }
+    querySelectorAll(sel: string): ElementStub[] { return findAll(this, sel); }
+    getBoundingClientRect(): { top: number; left: number; width: number; height: number } {
+        return { top: 0, left: 0, width: 300, height: 600 };
+    }
+    setPointerCapture(): void { /* not asserted */ }
+    releasePointerCapture(): void { /* not asserted */ }
+    focus(): void { /* not asserted */ }
+}
+
+interface SyntheticEvent { type: string; target: ElementStub; }
+
+/** Parses the double-quoted-attribute HTML subset the client scripts emit. */
+function parseAttrs(raw: string): Record<string, string> {
+    const attrs: Record<string, string> = {};
+    const re = /([a-zA-Z_:][-\w:.]*)\s*=\s*"([^"]*)"/g;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(raw)) !== null) { attrs[m[1]] = m[2]; }
+    return attrs;
+}
+
+/** Parses an HTML fragment into a fresh (identity-new) element tree, registering ids. */
+function parseFragment(html: string, parent: ElementStub, registry: Map<string, ElementStub>): ElementStub[] {
+    const result: ElementStub[] = [];
+    const stack: ElementStub[] = [];
+    const tagRe = /<(\/)?([a-zA-Z][\w-]*)([^<>]*)>/g;
+    let m: RegExpExecArray | null;
+    while ((m = tagRe.exec(html)) !== null) {
+        const [, closing, rawTag, rest] = m;
+        const tag = rawTag.toLowerCase();
+        if (closing) {
+            if (stack.length && stack[stack.length - 1].tagName === tag) { stack.pop(); }
+            continue;
+        }
+        const el = new ElementStub(tag, parseAttrs(rest), registry);
+        el.parentElement = stack.length ? stack[stack.length - 1] : parent;
+        const container = stack.length ? stack[stack.length - 1].children : result;
+        container.push(el);
+        if (el.id) { registry.set(el.id, el); }
+        const selfClosing = rest.trimEnd().endsWith('/') || VOID_TAGS.has(tag);
+        if (!selfClosing) { stack.push(el); }
+    }
+    return result;
+}
+
+/** Serializes an element tree back to markup (the mirror of `parseFragment`). */
+function serialize(nodes: ElementStub[]): string {
+    return nodes.map((n) => {
+        const attrStr = Object.entries(n.attrs).map(([k, v]) => `${k}="${v}"`).join(' ');
+        const open = attrStr ? `<${n.tagName} ${attrStr}>` : `<${n.tagName}>`;
+        if (VOID_TAGS.has(n.tagName)) { return open; }
+        return `${open}${serialize(n.children)}</${n.tagName}>`;
+    }).join('');
+}
+
+/** Deep-unregisters every id in a detached subtree and severs parent links. */
+function unregisterSubtree(nodes: ElementStub[], registry: Map<string, ElementStub>): void {
+    for (const n of nodes) {
+        if (n.id && registry.get(n.id) === n) { registry.delete(n.id); }
+        unregisterSubtree(n.children, registry);
+        n.parentElement = null;
+    }
+}
+
+/** The four selector forms the client scripts use: `#id`, `.class`, `[attr]`, `[attr="value"]`. */
+function matches(el: ElementStub, selector: string): boolean {
+    if (selector.startsWith('#')) { return el.id === selector.slice(1); }
+    if (selector.startsWith('.')) { return el.classList.contains(selector.slice(1)); }
+    const m = /^\[([-\w:.]+)(?:="([^"]*)")?]$/.exec(selector);
+    if (m) {
+        const [, name, value] = m;
+        if (!(name in el.attrs)) { return false; }
+        return value === undefined ? true : el.attrs[name] === value;
+    }
+    return false;
+}
+
+function findFirst(node: ElementStub, sel: string): ElementStub | null {
+    for (const c of node.children) {
+        if (matches(c, sel)) { return c; }
+        const found = findFirst(c, sel);
+        if (found) { return found; }
+    }
+    return null;
+}
+function findAll(node: ElementStub, sel: string, out: ElementStub[] = []): ElementStub[] {
+    for (const c of node.children) {
+        if (matches(c, sel)) { out.push(c); }
+        findAll(c, sel, out);
+    }
+    return out;
+}
+
+/** A permissive stand-in for any id the harness was not asked to seed — never `null`, so an
+ * unguarded `document.getElementById(x).addEventListener(...)` on a non-seeded id does not throw.
+ * Shape borrowed from `webview-script-executes.test.ts`'s `stubElement()`. */
+function permissiveStub(): Record<string, unknown> {
+    return {
+        addEventListener: () => { /* not asserted */ },
+        removeEventListener: () => { /* not asserted */ },
+        appendChild: () => { /* not asserted */ },
+        remove: () => { /* not asserted */ },
+        setPointerCapture: () => { /* not asserted */ },
+        releasePointerCapture: () => { /* not asserted */ },
+        getBoundingClientRect: () => ({ top: 0, left: 0, width: 300, height: 600 }),
+        querySelector: () => null,
+        querySelectorAll: () => [],
+        closest: () => null,
+        focus: () => { /* not asserted */ },
+        classList: { contains: () => false, add: () => { /* not asserted */ }, remove: () => { /* not asserted */ } },
+        dataset: {},
+        style: { setProperty: () => { /* not asserted */ }, display: '' },
+        innerHTML: '',
+        textContent: '',
+        value: '',
+        hidden: false,
+        checked: false,
+        files: [],
+    };
+}
+
+// ── Public surface ───────────────────────────────────────────────────────────
+
+/** The handle a test drives a running client script through. */
+export interface WebviewDom {
+    /** Looks up the current live element for a selector (`#id`, `.class`, `[attr]`, `[attr="value"]`). */
+    el(selector: string): unknown;
+    /** Dispatches a DOM event at `target`, bubbling through `parentElement` — supports delegated listeners. */
+    fire(target: unknown, type: string): void;
+    /** Delivers a `window.addEventListener('message', ...)` event, as the extension host would post one. */
+    dispatch(message: Record<string, unknown>): void;
+    /** Every `vscode.postMessage(...)` call the script made, in order. */
+    posted: Array<Record<string, unknown>>;
+}
+
+/**
+ * Builds a `WebviewDom` running `opts.script` against `opts.seedHtml`.
+ *
+ * @param opts.seedHtml - Initial markup; every id the script dereferences unguarded at
+ *   load must be present here or the script throws during setup.
+ * @param opts.script   - Client-JS bundle (e.g. `PREVIEW_CLIENT_JS`).
+ * @returns A `WebviewDom` handle for driving and inspecting the running script.
+ *
+ * @example
+ * const dom = makeWebviewDom({ seedHtml: '<button id="x"></button>', script: '...' });
+ * dom.fire(dom.el('#x'), 'click');
+ */
+export function makeWebviewDom(opts: { seedHtml: string; script: string }): WebviewDom {
+    const registry = new Map<string, ElementStub>();
+    const root = new ElementStub('root', {}, registry);
+    root.children = parseFragment(opts.seedHtml, root, registry);
+
+    const posted: Array<Record<string, unknown>> = [];
+    const winListeners = new Map<string, Array<(ev: { data: unknown }) => void>>();
+
+    const doc = {
+        getElementById: (id: string): unknown => registry.get(id) ?? permissiveStub(),
+        querySelector: (sel: string): ElementStub | null => (sel.startsWith('#') ? registry.get(sel.slice(1)) ?? null : findFirst(root, sel)),
+        querySelectorAll: (sel: string): ElementStub[] => findAll(root, sel),
+        createElement: (tag: string): ElementStub => new ElementStub(tag, {}, registry),
+        createRange: () => ({
+            setStart: () => { /* stub */ },
+            setEnd: () => { /* stub */ },
+            collapse: () => { /* stub */ },
+            selectNodeContents: () => { /* stub */ },
+            toString: () => '',
+        }),
+        execCommand: () => true,
+        addEventListener: () => { /* stub */ },
+        body: permissiveStub(),
+        documentElement: permissiveStub(),
+    };
+
+    const win = {
+        addEventListener: (type: string, fn: (ev: { data: unknown }) => void): void => {
+            const arr = winListeners.get(type) ?? [];
+            arr.push(fn);
+            winListeners.set(type, arr);
+        },
+        getSelection: () => ({ removeAllRanges: () => { /* stub */ }, addRange: () => { /* stub */ } }),
+        getComputedStyle: () => ({ getPropertyValue: () => '' }),
+        innerWidth: 300,
+        innerHeight: 600,
+        screen: { availWidth: 1920, availHeight: 1080 },
+        clipboardData: { getData: () => '' },
+    };
+
+    const vscode = {
+        postMessage: (m: Record<string, unknown>): void => { posted.push(m); },
+        getState: () => undefined,
+        setState: () => { /* stub */ },
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    const fn = new Function('vscode', 'document', 'window', 'setTimeout', 'clearTimeout', opts.script);
+    // Real timers — a debounced post (W1's T1.2) never fires against a no-op stub.
+    fn(vscode, doc, win, setTimeout, clearTimeout);
+
+    return {
+        el: (selector: string): ElementStub | null => (selector.startsWith('#') ? registry.get(selector.slice(1)) ?? null : findFirst(root, selector)),
+        fire: (target: unknown, type: string): void => {
+            if (!target) { return; }
+            const event: SyntheticEvent = { type, target: target as ElementStub };
+            let node: ElementStub | null = target as ElementStub;
+            while (node) {
+                for (const listener of node.listenersFor(type)) { listener(event); }
+                node = node.parentElement;
+            }
+        },
+        dispatch: (message: Record<string, unknown>): void => {
+            for (const listener of winListeners.get('message') ?? []) { listener({ data: message }); }
+        },
+        posted,
+    };
+}
+
+/** Seed markup mirroring `preview.render.ts`'s `#varsSection` block plus every id
+ * `PREVIEW_CLIENT_JS` dereferences unguarded at load (`#insertBtn`, `#copyBtn`, `#editBtn`,
+ * `#cancelBtn`, `#codeWrapper`). One variable, `VK-host`, is enough to exercise the flow. */
+const PREVIEW_SEED_HTML = `
+  <div id="varsSection">
+    <div class="inputs" id="varInputs">
+      <div class="input-row">
+        <label for="v-VK-host">Host</label>
+        <input id="v-VK-host" data-var="VK-host" type="text" value="" placeholder="Host">
+      </div>
+    </div>
+    <div class="actions varset-actions">
+      <button class="btn btn-secondary" id="applyVarSetBtn">Apply Variable Set</button>
+      <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
+    </div>
+  </div>
+  <button id="insertBtn">Insert</button>
+  <button id="copyBtn">Copy</button>
+  <button id="editBtn">Edit</button>
+  <button id="cancelBtn">Cancel</button>
+  <div id="codeWrapper"></div>
+`;
+
+/** One-line preset over {@link makeWebviewDom} for the preview panel's own client script. */
+export function makePreviewDom(): WebviewDom {
+    return makeWebviewDom({ seedHtml: PREVIEW_SEED_HTML, script: PREVIEW_CLIENT_JS });
+}

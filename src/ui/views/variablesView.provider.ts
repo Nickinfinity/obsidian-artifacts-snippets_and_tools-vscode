@@ -182,14 +182,48 @@ export class VariablesViewProvider implements vscode.TreeDataProvider<VariableNo
     private nodes: VariableNode[] = [];
 
     /**
-     * Invalidates the scanner cache and re-renders the tree from disk.
+     * Re-renders the tree whenever the shared scanner cache is invalidated —
+     * by this provider's own `refresh()`, or by any other caller (creating a
+     * variable set through the preview, for one).
+     *
+     * The listener fires `changeEmitter` **directly** and must never call
+     * `refresh()`: the scanner's emit is synchronous inside `invalidate()`, so
+     * `refresh() → invalidate() → listener → refresh()` would recurse forever.
+     * That is also why `refresh()` below no longer fires the emitter itself.
+     */
+    private readonly scannerSub: vscode.Disposable =
+        this.scanner.onDidInvalidate(() => { this.changeEmitter.fire(); });
+
+    /**
+     * Invalidates the scanner cache, which re-renders the tree from disk.
+     *
+     * The re-render is not spelled here: `invalidate()` fires
+     * `onDidInvalidate`, `scannerSub` hears it and fires `changeEmitter`. Adding
+     * an explicit `changeEmitter.fire()` back would double-fire every refresh.
+     *
+     * @returns void
      *
      * @example
      * provider.refresh();
      */
     refresh(): void {
         this.scanner.invalidate();
-        this.changeEmitter.fire();
+    }
+
+    /**
+     * Releases this provider's subscription to the process-wide scanner.
+     *
+     * One `Disposable`, not an array — there is exactly one subscription. The
+     * scanner is a module singleton, so a provider that never disposes leaks a
+     * listener onto it for the life of the host.
+     *
+     * @returns void
+     *
+     * @example
+     * context.subscriptions.push(provider);
+     */
+    dispose(): void {
+        this.scannerSub.dispose();
     }
 
     /**

@@ -19,6 +19,10 @@ import { parseFromContent } from './parser.service.js';
 export class VarSetScanner {
     private cache = new Map<string, ParsedArtifactFile[]>();
 
+    private readonly invalidateEmitter = new vscode.EventEmitter<void>();
+    /** Fired by `invalidate()` — subscribers (the Variables tree) re-render instead of going stale. */
+    readonly onDidInvalidate = this.invalidateEmitter.event;
+
     /**
      * Scans the directory and returns parsed `artifactType: Variables` artifact files.
      *
@@ -40,7 +44,9 @@ export class VarSetScanner {
     }
 
     /**
-     * Clears the internal cache so the next `scan` re-reads from disk.
+     * Clears the internal cache so the next `scan` re-reads from disk, and
+     * fires `onDidInvalidate` so subscribers (e.g. the Variables tree view)
+     * know to re-render rather than going stale until a window reload.
      *
      * @returns void
      *
@@ -49,6 +55,7 @@ export class VarSetScanner {
      */
     invalidate(): void {
         this.cache.clear();
+        this.invalidateEmitter.fire();
     }
 
     /**

@@ -30,8 +30,6 @@ import { CODE_BLOCK_CLIENT_JS } from './codeBlock.js';
  * })();</script>`;
  */
 export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
-  const varInputs = document.getElementById('varInputs');
-
   // ── Buttons ──────────────────────────────────────────────────────────────
   function collectVars() {
     const out = {};
@@ -93,6 +91,10 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
   });
 
   const varsSection = document.getElementById('varsSection');
+  // #varsSection's children are replaced wholesale on every diff-view swap
+  // (showDiffView / restoreVarsView), which mints a fresh #varInputs node —
+  // a const captured once at load would go stale after the first round-trip.
+  function varInputsEl() { return varsSection ? varsSection.querySelector('#varInputs') : null; }
 
   // ── Variables-section resize ─────────────────────────────────────────────
   // The extension cannot read this pane's size, so the drag is resolved here:
@@ -141,40 +143,47 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     btn.style.display = hasValue ? '' : 'none';
   }
 
-  const applyBtn = document.getElementById('applyVarSetBtn');
-  if (applyBtn) {
-    applyBtn.addEventListener('click', function () {
-      vscode.postMessage({ command: 'pickVarSet', values: collectVars() });
-    });
-  }
-  const saveBtn = document.getElementById('saveAsVarSetBtn');
-  if (saveBtn) {
-    saveBtn.addEventListener('click', function () {
-      vscode.postMessage({ command: 'saveAsVarSet', values: collectVars() });
-    });
-  }
-  varInputs.addEventListener('input', function (ev) {
-    const t = ev.target;
-    if (t && t.dataset && t.dataset.var) {
-      // Manual edit removes the source badge for this var.
-      const badge = varInputs.querySelector('[data-var-source="' + t.dataset.var + '"]');
-      if (badge) {
-        badge.remove();
-        vscode.postMessage({ command: 'clearVarSource', name: t.dataset.var });
+  // Delegated from #varsSection, which is never itself replaced by a diff-view
+  // swap — only its children are. A direct bind on #applyVarSetBtn /
+  // #saveAsVarSetBtn / #varInputs dies the moment showDiffView/restoreVarsView
+  // mints new nodes for those ids; delegation survives because the listener
+  // lives on the one element that never gets swapped.
+  if (varsSection) {
+    varsSection.addEventListener('click', function (ev) {
+      const t = ev.target;
+      if (!t || !t.id) { return; }
+      if (t.id === 'applyVarSetBtn') {
+        vscode.postMessage({ command: 'pickVarSet', values: collectVars() });
+      } else if (t.id === 'saveAsVarSetBtn') {
+        vscode.postMessage({ command: 'saveAsVarSet', values: collectVars() });
       }
-    }
-    refreshSaveBtn();
-  });
+    });
+    varsSection.addEventListener('input', function (ev) {
+      const t = ev.target;
+      if (t && t.dataset && t.dataset.var) {
+        // Manual edit removes the source badge for this var.
+        const box = varInputsEl();
+        const badge = box ? box.querySelector('[data-var-source="' + t.dataset.var + '"]') : null;
+        if (badge) {
+          badge.remove();
+          vscode.postMessage({ command: 'clearVarSource', name: t.dataset.var });
+        }
+      }
+      refreshSaveBtn();
+    });
+  }
   refreshSaveBtn();
 
   // ── updateVars / fileUpdated incoming messages ──────────────────────────
   function rebuildVarInputs(vars) {
+    const box = varInputsEl();
+    if (!box) { return; }
     const existing = collectVars();
     if (!vars || vars.length === 0) {
-      varInputs.innerHTML = '<p class="muted">No variables defined.</p>';
+      box.innerHTML = '<p class="muted">No variables defined.</p>';
       return;
     }
-    varInputs.innerHTML = vars.map(function (v) {
+    box.innerHTML = vars.map(function (v) {
       const value = existing[v.name] !== undefined ? existing[v.name] : (v.defaultValue || '');
       return '<div class="input-row">' +
         '<label for="v-' + esc(v.name) + '">' + esc(lbl(v.name)) + '</label>' +
@@ -205,9 +214,11 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
       const name = el.dataset.var;
       if (Object.prototype.hasOwnProperty.call(values, name)) { el.value = values[name]; }
     });
+    const box = varInputsEl();
     const flagged = new Set(varNames || []);
     flagged.forEach(function (name) {
-      const input = varInputs.querySelector('[data-var="' + name + '"]');
+      if (!box) { return; }
+      const input = box.querySelector('[data-var="' + name + '"]');
       if (!input) { return; }
       const row = input.closest('.input-row');
       if (!row) { return; }

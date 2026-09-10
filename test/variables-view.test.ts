@@ -6,6 +6,7 @@ import {
     VariablesViewProvider,
     buildVariableNodes,
 } from '../src/ui/views/variablesView.provider.js';
+import { getVarSetScanner } from '../src/ui/panels/varsetPicker.panel.js';
 
 /**
  * Unit tests for the Variables tree's pure data layer (T13, VSX-2xx).
@@ -213,5 +214,29 @@ suite('VariablesViewProvider.getTreeItem', () => {
         const item = provider.getTreeItem({ id: 'file::subset:1::var:0', parentId: 's', kind: 'var', label: 'VK-x = 1' });
 
         assert.strictEqual(item.id, 'file::subset:1::var:0');
+    });
+});
+
+/**
+ * H0.1 — a scanner invalidation must reach the tree.
+ *
+ * `VarSetScanner` is a process-wide singleton (`varsetPicker.panel.ts`), and
+ * the tree caches its flattened rows on `this.nodes`, re-scanning only on a
+ * root `getChildren` call — which only `onDidChangeTreeData` triggers. Before
+ * this hunk, `handleSaveAsVarSet` cleared the cache and stopped there: the
+ * view stayed stale until a window reload (defect D-B).
+ */
+suite('VariablesViewProvider — scanner invalidation reaches the tree (H0.1)', () => {
+
+    test('an invalidation on the shared scanner fires onDidChangeTreeData', () => {
+        const provider = new VariablesViewProvider();
+        let fired = 0;
+        const sub = provider.onDidChangeTreeData(() => { fired++; });
+
+        getVarSetScanner().invalidate();
+
+        assert.strictEqual(fired, 1, 'a scanner invalidation did not reach the tree');
+        sub.dispose();
+        provider.dispose();
     });
 });

@@ -60,6 +60,10 @@ export async function activate(context: vscode.ExtensionContext) {
 			VariablesViewProvider.viewType,
 			variablesProvider,
 		),
+		// The provider itself, because it subscribes to the process-wide
+		// VarSetScanner singleton — without this the listener outlives the
+		// provider for the life of the host (H0.1).
+		variablesProvider,
 	);
 
 	// Variables CRUD commands. Registered after the tree provider above, so the
