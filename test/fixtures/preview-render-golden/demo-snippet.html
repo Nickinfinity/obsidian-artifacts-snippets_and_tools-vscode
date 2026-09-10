@@ -34,10 +34,6 @@
                       value="it&#39;s &quot;ok&quot;" placeholder="Msg">
                
              </div></div>
-    <div class="actions varset-actions">
-      <button class="btn btn-secondary" id="applyVarSetBtn">Apply Variable Set</button>
-      <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
-    </div>
   </div>
   <div class="vars-resize-handle" id="varsResizeHandle" role="separator" aria-orientation="horizontal"
        aria-label="Resize the variables section" tabindex="0"></div>
@@ -282,31 +278,28 @@
     });
   }
 
-  // ── Variable-set buttons ─────────────────────────────────────────────────
-  let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
-
-  function refreshSaveBtn() {
-    const btn = document.getElementById('saveAsVarSetBtn');
-    if (!btn) { return; }
-    const hasValue = Object.values(collectVars()).some(function (v) { return v && v.length > 0; });
-    btn.style.display = hasValue ? '' : 'none';
+  // ── Variables values channel ─────────────────────────────────────────────
+  // The host has no other way to learn what the user typed: values live only
+  // in this DOM. Debounced on the same window as the code area's own
+  // re-render so PreviewModeController.currentValues() stays cheap to read.
+  let snapshotTimer;
+  function scheduleSnapshot() {
+    if (snapshotTimer) { clearTimeout(snapshotTimer); }
+    snapshotTimer = setTimeout(function () {
+      snapshotTimer = undefined;
+      vscode.postMessage({ command: 'varsSnapshot', values: collectVars() });
+    }, 150);
   }
 
+  let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
+
   // Delegated from #varsSection, which is never itself replaced by a diff-view
-  // swap — only its children are. A direct bind on #applyVarSetBtn /
-  // #saveAsVarSetBtn / #varInputs dies the moment showDiffView/restoreVarsView
-  // mints new nodes for those ids; delegation survives because the listener
-  // lives on the one element that never gets swapped.
+  // swap — only its children are. A direct bind on #varInputs's inputs dies
+  // the moment showDiffView/restoreVarsView mints new nodes for that id;
+  // delegation survives because the listener lives on the one element that
+  // never gets swapped. The diff view's own #varSetApplyBtn/#varSetCancelBtn
+  // are bound fresh in showDiffView below, each time it mints them.
   if (varsSection) {
-    varsSection.addEventListener('click', function (ev) {
-      const t = ev.target;
-      if (!t || !t.id) { return; }
-      if (t.id === 'applyVarSetBtn') {
-        vscode.postMessage({ command: 'pickVarSet', values: collectVars() });
-      } else if (t.id === 'saveAsVarSetBtn') {
-        vscode.postMessage({ command: 'saveAsVarSet', values: collectVars() });
-      }
-    });
     varsSection.addEventListener('input', function (ev) {
       const t = ev.target;
       if (t && t.dataset && t.dataset.var) {
@@ -318,10 +311,9 @@
           vscode.postMessage({ command: 'clearVarSource', name: t.dataset.var });
         }
       }
-      refreshSaveBtn();
+      scheduleSnapshot();
     });
   }
-  refreshSaveBtn();
 
   // ── updateVars / fileUpdated incoming messages ──────────────────────────
   function rebuildVarInputs(vars) {
@@ -354,7 +346,6 @@
     if (!varsSection || savedVarsHtml === null) { return; }
     varsSection.innerHTML = savedVarsHtml;
     savedVarsHtml = null;
-    refreshSaveBtn();
   }
   function applyValuesAndBadges(values, subSetName, varNames) {
     restoreVarsView();
@@ -379,16 +370,14 @@
       badge.textContent = 'from: ' + subSetName;
       row.appendChild(badge);
     });
-    refreshSaveBtn();
   }
 
   window.addEventListener('message', function (event) {
     const msg = event.data || {};
-    if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); refreshSaveBtn(); }
+    if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); }
     if (msg.command === 'fileUpdated' && msg.artifact) {
       window.__codeBlock.setCode(msg.artifact.code || '');
       rebuildVarInputs(msg.artifact.vars);
-      refreshSaveBtn();
     }
     if (msg.command === 'showVarSetDiff') { showDiffView(msg.html); }
     if (msg.command === 'varSetApplied')  { applyValuesAndBadges(msg.values || {}, msg.subSetName || '', msg.varNames || []); }

@@ -51,6 +51,42 @@ suite('package.json — Variables view menus', () => {
         }
     });
 
+    test('applyToPreview is palette-hidden and saveCurrentValues is palette-visible', () => {
+        // W1/H1.1. The asymmetry is the whole design: `applyToPreview` takes a
+        // clicked `subset` node, so a palette invocation would arrive with
+        // `node === undefined` and refuse — it is hidden by an explicit
+        // `when: false`. `saveCurrentValues` takes no node and is deliberately
+        // invokable from the palette with no preview open (it shows the O-2
+        // information message). Nothing else pins this, and both failure modes
+        // are silent: a missing `when: false` renders a command that always
+        // refuses, and a stray one hides a command the user is meant to reach.
+        const palette = pkg.contributes.menus['commandPalette'] ?? [];
+        const hidden = new Set(
+            palette.filter(e => e.when === 'false').map(e => e.command),
+        );
+
+        assert.ok(
+            hidden.has(`${VARIABLES_PREFIX}applyToPreview`),
+            'applyToPreview must carry a commandPalette when:false — it needs a clicked subset node',
+        );
+        assert.ok(
+            !hidden.has(`${VARIABLES_PREFIX}saveCurrentValues`),
+            'saveCurrentValues must stay palette-visible — it takes no node and is valid with no preview open',
+        );
+    });
+
+    test('every view/title entry is scoped to the Variables view', () => {
+        // Without `view == …`, a `view/title` command renders on EVERY view's
+        // title bar — silently, since it is otherwise a valid command.
+        for (const entry of pkg.contributes.menus['view/title'] ?? []) {
+            if (!entry.command.startsWith(VARIABLES_PREFIX)) { continue; }
+            assert.ok(
+                entry.when?.includes('view == obsidian-artifacts.variablesView'),
+                `${entry.command} is in view/title without a view scope — it renders on every view's title bar`,
+            );
+        }
+    });
+
     test('every menu entry points at a contributed command', () => {
         const declared = new Set(pkg.contributes.commands.map(c => c.command));
         const entries = [

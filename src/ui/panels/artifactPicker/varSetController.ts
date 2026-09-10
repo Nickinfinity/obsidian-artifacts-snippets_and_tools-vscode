@@ -5,7 +5,7 @@ import { slugify } from '../../../services/filename.service.js';
 import { getEntry } from '../../../services/artifact-type-config.service.js';
 import { getVaultRootUri } from '../../../services/config.service.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
-import type { ApplyResult, VarSubSet } from '../../../types/varset.types.js';
+import type { ApplyResult } from '../../../types/varset.types.js';
 import { getVarSetScanner, pickVarSet } from '../varsetPicker.panel.js';
 import { renderVarSetDiffHtml } from './varSetDiff.js';
 
@@ -34,8 +34,15 @@ export interface VarSetControllerCallbacks {
  */
 export class VarSetController {
 
-    /** Pending `ApplyResult` between `pickVarSet` selection and `confirmApply`. */
-    private pending: { subSet: VarSubSet; result: ApplyResult } | undefined;
+    /**
+     * Pending `ApplyResult` between a sub-set selection and `confirmApply`.
+     *
+     * Holds the sub-set's **heading only**, not the `VarSubSet`: the Variables
+     * pane reaches this flow through `showDiffFor`, and its `PreviewVarTarget`
+     * carries no sub-set (a `VarSubSet` requires a `sourceFile` the preview
+     * cannot obtain). The heading was the only field ever read here.
+     */
+    private pending: { heading: string; result: ApplyResult } | undefined;
 
     constructor(
         private readonly extensionUri: vscode.Uri,
@@ -71,13 +78,36 @@ export class VarSetController {
         if (!picked) { return; }
 
         const currentValues = (msg.values as Record<string, string> | undefined) ?? {};
-        const result = applyVarSet(currentValues, picked.subSet.vars);
-        this.pending = { subSet: picked.subSet, result };
+        this.showDiffFor(picked.subSet.heading, picked.subSet.vars, currentValues);
+    }
+
+    /**
+     * Computes the diff and posts it to the webview — the half of the apply
+     * flow that has nothing to do with *how* the sub-set was chosen.
+     *
+     * Split out (W1/H1.4) so the Variables pane can reach the diff step
+     * without reimplementing it: `handlePickVarSet` is the QuickPick caller,
+     * `PreviewPanelController.applyVarSet` is the pane's caller, and both land
+     * here. Synchronous — nothing below awaits.
+     *
+     * @param heading       - The sub-set's display name, for the diff header and the badge.
+     * @param vars          - The sub-set's variables to merge in.
+     * @param currentValues - The preview's current input values to diff against.
+     * @returns void
+     *
+     * @example
+     * ctrl.showDiffFor('Local Dev', subSet.vars, { 'VK-host': '' });
+     */
+    showDiffFor(heading: string, vars: readonly ParsedVar[], currentValues: Record<string, string>): void {
+        // Spread: `applyVarSet` takes a mutable `ParsedVar[]`, and a
+        // `readonly` array will not assign to it.
+        const result = applyVarSet(currentValues, [...vars]);
+        this.pending = { heading, result };
 
         this.cb.postMessage({
             command:    'showVarSetDiff',
-            html:       renderVarSetDiffHtml(result.changes, picked.subSet.heading),
-            subSetName: picked.subSet.heading,
+            html:       renderVarSetDiffHtml(result.changes, heading),
+            subSetName: heading,
         });
     }
 
@@ -97,12 +127,12 @@ export class VarSetController {
             .filter(c => c.action === 'filled' || c.action === 'overridden')
             .map(c => c.name);
 
-        this.cb.rememberAppliedSet(pending.subSet.heading, filledOrOverriddenNames);
+        this.cb.rememberAppliedSet(pending.heading, filledOrOverriddenNames);
 
         this.cb.postMessage({
             command:    'varSetApplied',
             values:     pending.result.values,
-            subSetName: pending.subSet.heading,
+            subSetName: pending.heading,
             varNames:   filledOrOverriddenNames,
         });
         this.pending = undefined;

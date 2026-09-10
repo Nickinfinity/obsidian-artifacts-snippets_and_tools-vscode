@@ -9,13 +9,14 @@ import type { VarSubSet } from '../types/varset.types.js';
 import type { ParsedArtifactFile } from '../types/parsed-artifact.types.js';
 import type { ArtifactFormModel } from '../types/artifact-form.types.js';
 import type { VariableNode, VariableNodeKind, VariablesViewProvider } from '../ui/views/variablesView.provider.js';
+import { isPathWithin } from '../utils/path-containment.js';
 import { confirmTextFor } from './variables.confirm.helpers.js';
 
 /**
- * Pure/light-vscode helpers for `variables.command.ts` (T16, VSX-219).
+ * Pure/light-vscode helpers for `variables.command.ts` (T16, VSX-219) and
+ * `variables-apply.command.ts` (T1.3, VSX-246).
  *
- * Split out under `CLAUDE.md`'s file-size rule: nine command handlers plus
- * their shared plumbing does not fit the ~400-line ceiling in one file. This
+ * Split out under `CLAUDE.md`'s file-size rule: nine-plus command handlers
  * module owns node-id parsing, the `ParsedArtifactFile` → `ArtifactFormModel`
  * conversion (deliberately **here**, not in a service — see the type's own
  * doc comment), and the resolve/write/confirm plumbing every handler shares.
@@ -23,27 +24,51 @@ import { confirmTextFor } from './variables.confirm.helpers.js';
  */
 
 /**
- * Suffixes appended to `obsidian-artifacts.variables.` for the nine
- * contributed commands, already present in `package.json` (orchestrator-only
- * — read, never edited here). One declaration; `buildVariableCommandIds`
- * derives from it so the id list is never hand-copied a second time.
+ * Suffixes appended to `obsidian-artifacts.variables.` for the contributed
+ * commands. The first nine are already present in `package.json`
+ * (orchestrator-only — read, never edited here); `applyToPreview` and
+ * `saveCurrentValues` (T1.3, VSX-246) are new and land in `package.json`
+ * separately (H1.1). One declaration; `buildVariableCommandIds` derives from
+ * it so the id list is never hand-copied a second time.
  */
 const VARIABLE_COMMAND_SUFFIXES = [
     'newFile', 'newSubSet', 'addVar', 'editValue',
     'renameVar', 'renameSubSet', 'deleteVar', 'deleteSubSet', 'deleteFile',
+    'applyToPreview', 'saveCurrentValues',
 ] as const;
 
 /**
- * Derives the nine `obsidian-artifacts.variables.*` command ids.
+ * Derives one fully-qualified `obsidian-artifacts.variables.*` command id
+ * from its suffix — the one place `'obsidian-artifacts.variables.'` is
+ * spelled as a prefix, so `buildVariableCommandIds` and any single-id
+ * constant agree by construction.
  *
- * @returns The nine fully-qualified command ids, in `VARIABLE_COMMAND_SUFFIXES` order.
+ * @param suffix - One of `VARIABLE_COMMAND_SUFFIXES`.
+ * @returns The fully-qualified command id.
+ *
+ * @example
+ * variableCommandId('applyToPreview') // → 'obsidian-artifacts.variables.applyToPreview'
+ */
+function variableCommandId(suffix: typeof VARIABLE_COMMAND_SUFFIXES[number]): string {
+    return `obsidian-artifacts.variables.${suffix}`;
+}
+
+/**
+ * Derives the `obsidian-artifacts.variables.*` command ids.
+ *
+ * @returns The fully-qualified command ids, in `VARIABLE_COMMAND_SUFFIXES` order.
  *
  * @example
  * buildVariableCommandIds() // → ['obsidian-artifacts.variables.newFile', ...]
  */
 export function buildVariableCommandIds(): string[] {
-    return VARIABLE_COMMAND_SUFFIXES.map(s => `obsidian-artifacts.variables.${s}`);
+    return VARIABLE_COMMAND_SUFFIXES.map(variableCommandId);
 }
+
+/** Command id for "Apply Variable Set to Preview" (T1.3). */
+export const APPLY_TO_PREVIEW_COMMAND_ID = variableCommandId('applyToPreview');
+/** Command id for "Save Preview Values as Variable Set" (T1.3). */
+export const SAVE_CURRENT_VALUES_COMMAND_ID = variableCommandId('saveCurrentValues');
 
 /**
  * Extracts the absolute file path a `VariableNode` belongs to.
@@ -277,6 +302,10 @@ export async function resolveTarget(
     }
     const filePath = fileNodePath(node);
     const rootDir = vscode.Uri.joinPath(vaultRoot, getEntry('Variables').dir).fsPath;
+    if (!isPathWithin(rootDir, filePath)) {
+        io.showError(`Obsidian Artifacts: "${filePath}" is outside the Variables directory.`);
+        return undefined;
+    }
     const parsed = parseArtifactFile(filePath, rootDir);
     if (!parsed) {
         io.showError(`Obsidian Artifacts: could not read "${filePath}".`);

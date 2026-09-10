@@ -143,6 +143,18 @@
         "title": "Rename Sub-Set",
         "category": "Obsidian Artifacts",
         "icon": "$(edit)"
+      },
+      {
+        "command": "obsidian-artifacts.variables.applyToPreview",
+        "title": "Apply to Preview",
+        "category": "Obsidian Artifacts",
+        "icon": "$(symbol-variable)"
+      },
+      {
+        "command": "obsidian-artifacts.variables.saveCurrentValues",
+        "title": "Save Current Values as Set",
+        "category": "Obsidian Artifacts",
+        "icon": "$(save)"
       }
     ],
     "submenus": [
@@ -223,6 +235,10 @@
         },
         {
           "command": "obsidian-artifacts.variables.renameSubSet",
+          "when": "false"
+        },
+        {
+          "command": "obsidian-artifacts.variables.applyToPreview",
           "when": "false"
         }
       ],
@@ -449,6 +465,11 @@
           "command": "obsidian-artifacts.variables.newFile",
           "when": "view == obsidian-artifacts.variablesView",
           "group": "navigation@1"
+        },
+        {
+          "command": "obsidian-artifacts.variables.saveCurrentValues",
+          "when": "view == obsidian-artifacts.variablesView",
+          "group": "navigation@2"
         }
       ],
       "view/item/context": [
@@ -476,6 +497,11 @@
           "command": "obsidian-artifacts.variables.deleteSubSet",
           "when": "view == obsidian-artifacts.variablesView && viewItem == subset",
           "group": "1_modify@2"
+        },
+        {
+          "command": "obsidian-artifacts.variables.applyToPreview",
+          "when": "view == obsidian-artifacts.variablesView && viewItem == subset",
+          "group": "2_preview@1"
         },
         {
           "command": "obsidian-artifacts.variables.editValue",

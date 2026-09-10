@@ -9,6 +9,9 @@ import { registerCreateSurfaceCommands } from './commands/create-from-surface.co
 import { MainViewProvider, setMainViewProvider } from './ui/views/mainView.provider.js';
 import { VariablesViewProvider } from './ui/views/variablesView.provider.js';
 import { registerVariablesCommands } from './commands/variables.command.js';
+import { handleApplyToPreview, handleSaveCurrentValues, liveApplyDeps } from './commands/variables-apply.command.js';
+import { APPLY_TO_PREVIEW_COMMAND_ID, SAVE_CURRENT_VALUES_COMMAND_ID } from './commands/variables.command.helpers.js';
+import type { VariableNode } from './ui/views/variablesView.provider.js';
 import { sweepOrphans } from './services/scratch-file.service.js';
 import { SCRATCH_SUBDIR as FORM_BLOCK_SUBDIR } from './ui/panels/artifactForm/blockExpand.js';
 import { BLOCK_EDIT_SUBDIR } from './ui/panels/artifactPicker/blockEditor.js';
@@ -69,6 +72,22 @@ export async function activate(context: vscode.ExtensionContext) {
 	// Variables CRUD commands. Registered after the tree provider above, so the
 	// refresh callback they fire always has a provider to reach.
 	registerVariablesCommands(context, variablesProvider);
+
+	// The two Variables-pane commands that act on a live preview (W1/T1.3).
+	// Ids come from the `VARIABLE_COMMAND_SUFFIXES` derivation, never hand-typed
+	// — `package-variables-menus.test.ts` pins the manifest to the same source.
+	// `liveApplyDeps()` is called per invocation so `vaultRoot` reflects the
+	// current configuration rather than whatever it was at activation.
+	context.subscriptions.push(
+		vscode.commands.registerCommand(
+			APPLY_TO_PREVIEW_COMMAND_ID,
+			(node?: VariableNode) => handleApplyToPreview(node, liveApplyDeps()),
+		),
+		vscode.commands.registerCommand(
+			SAVE_CURRENT_VALUES_COMMAND_ID,
+			() => handleSaveCurrentValues(liveApplyDeps()),
+		),
+	);
 
 	// Clean up scratch files orphaned by a previous crash / hard-close, through
 	// the one scratch-file authority. Both subdirs are now owned by the service

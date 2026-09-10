@@ -45,6 +45,35 @@ function renderedHtml(): string {
     );
 }
 
+/** The rendered preview document for a minimal single-block artifact carrying one `<VK-xxx>` var. */
+function renderedHtmlWithVars(): string {
+    const md = [
+        '---',
+        'artifactType: Snippet',
+        'title: Demo',
+        'language: typescript',
+        '---',
+        '',
+        '```typescript',
+        'const host = "<VK-host>";',
+        '```',
+        '',
+        'vars:',
+        'VK-host=localhost',
+        '',
+    ].join('\n');
+    const parsed = parseFromContent(md, '/v/Snippets/demo.md', '/v');
+    assert.ok(parsed, 'fixture failed to parse');
+    return renderPreviewHtml(
+        parsed,
+        renderCodeRowsHtml(parsed.code, 'typescript'),
+        'test-nonce',
+        'https://css',
+        'https://csp',
+        {},
+    );
+}
+
 
 suite('preview client script ↔ rendered buttons', () => {
 
@@ -105,6 +134,22 @@ suite('preview client script ↔ rendered buttons', () => {
             null,
             'code-block.css hard-codes a line count instead of reading the property',
         );
+    });
+});
+
+suite('preview markup no longer carries the var-set buttons (T1.1)', () => {
+
+    test('the Apply and Save-as var-set buttons are gone from the preview', () => {
+        const html = renderedHtmlWithVars();
+        assert.ok(!html.includes('applyVarSetBtn'), 'the Apply button is still in the preview markup');
+        assert.ok(!html.includes('saveAsVarSetBtn'), 'the Save-as button is still in the preview markup');
+    });
+
+    test('the variable inputs and resize handle survive the button removal', () => {
+        const html = renderedHtmlWithVars();
+        assert.ok(html.includes('id="varInputs"'), 'the variable inputs must stay - insert reads them');
+        assert.ok(html.includes('id="varsResizeHandle"'), 'the resize handle must stay (D-2)');
+        assert.ok(html.includes('data-var="VK-host"'), 'per-variable inputs must still render');
     });
 });
 

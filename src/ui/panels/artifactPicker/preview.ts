@@ -7,7 +7,7 @@ import { PreviewModeController, type SectionKey } from '../../../services/previe
 import { getNonce } from '../../../utils/helpers.js';
 import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js';
 import { out } from './shared.js';
-import { performInsert, persistBlockCode, type InvocationSurface } from './preview.helpers.js';
+import { performInsert, persistBlockCode, sanitiseVarsSnapshot, type InvocationSurface } from './preview.helpers.js';
 import { confirmModal } from '../../../services/confirm.service.js';
 import type { WebviewHost, HostMessage } from './webviewHost.js';
 import type { MainViewPreviewState } from '../../views/mainView.preview.js';
@@ -21,6 +21,7 @@ import { PaneWidthController, type PaneMetrics } from '../../../services/pane-wi
 import { getPreviewWidthSteps, getVariablesHeightFraction, setVariablesHeightFraction } from '../../../services/config.service.js';
 import { varsHeightCss } from '../../../services/pane-layout.service.js';
 import { EDIT_ARTIFACT_COMMAND_ID } from '../../../commands/editArtifact.command.js';
+import { setPreviewTarget } from '../../../services/preview-target.service.js';
 import type { BatchOutcome } from '../../../types/multi-index.types.js';
 
 // Re-export the adapter so the navigator does not need to import preview.helpers directly.
@@ -96,6 +97,10 @@ export class PreviewPanelController {
     private readonly blockEdit: BlockEditController;
     private readonly varSet:    VarSetController;
     private readonly batch = new BatchGate();  // one-shot per-step gate a MultiIndexRunner arms (T4)
+    /** Releases this preview's claim on the Variables-pane target; see `claimTarget` (H1.4). */
+    private releaseTarget: (() => void) | undefined;
+    /** Latest values the webview reported, so `currentValues()` stays synchronous (H1.4). */
+    private varsSnapshot: Record<string, string> = {};
     /**
      * Widens the pane for the session and narrows it back by the same count.
      *
@@ -191,6 +196,13 @@ export class PreviewPanelController {
     /** Ends the preview session and returns the pane to `idle`. */
     dispose(): void {
         if (!this.open) { return; }
+        // Released here, on the one path every preview-end funnels through —
+        // never from a teardown hook. A sidebar *hide* disposes a WebviewView
+        // (H2), so a preview that died without releasing would leave the
+        // Variables pane holding a target whose applyVarSet posts into a dead
+        // webview (ledger #23).
+        this.releaseTarget?.();
+        this.releaseTarget = undefined;
         this.open = false;
         void this.blockEdit.teardown();
         this.msgSub?.dispose();
@@ -240,6 +252,14 @@ export class PreviewPanelController {
         // run *after* the flush it exists to prevent (ledger #119).
         this.cb.host.clearQueue();
         if (!await this.ensureHost()) { return; }
+
+        // Claimed here, not inside `ensureHost`: `showMultiBlockPreview`
+        // reaches the same `ensureHost` but renders no variable inputs, so
+        // claiming there would let the Variables pane apply a set into a pane
+        // with nothing to apply it to. And not before the check either — if
+        // `ensureHost` fails, `dispose()`'s `open` guard means the release
+        // never runs and the target leaks.
+        this.claimTarget();
 
         const varSources = this.modeController?.getAllVarSources() ?? {};
         this.cb.showPreviewState({ kind: 'single', artifact, varSources });
@@ -366,6 +386,22 @@ export class PreviewPanelController {
         });
     }
 
+    // ── Internal: the Variables-pane seam (W1/H1.4) ───────────────────────────
+
+    /** Registers this preview as the Variables pane's target for the session. */
+    private claimTarget(): void {
+        this.releaseTarget?.();
+        this.releaseTarget = setPreviewTarget({
+            applyVarSet: (subSetName, vars) => {
+                this.varSet.showDiffFor(subSetName, vars, this.varsSnapshot);
+            },
+            currentValues: () => ({ ...this.varsSnapshot }),
+            // Routed through the controller, not reimplemented: it holds the
+            // `getCurrentArtifact()` gate that carries the artifact's tags.
+            saveAsSet: values => this.varSet.handleSaveAsVarSet({ values }),
+        });
+    }
+
     private setupMessageHandler(): void {
         this.msgSub?.dispose();
         this.msgSub = undefined;
@@ -393,11 +429,10 @@ export class PreviewPanelController {
         else if (cmd === 'overwrite')     { await this.handleOverwrite(msg); }
         else if (cmd === 'varsHeightChanged') { await this.handleVarsHeightChanged(msg); }
         else if (cmd === 'cancel')        { this.cancel(); }
-        else if (cmd === 'pickVarSet')    { await this.varSet.handlePickVarSet(msg); }
         else if (cmd === 'confirmApply')  { this.varSet.handleConfirmApply(); }
         else if (cmd === 'cancelApply')   { this.varSet.handleCancelApply(); }
-        else if (cmd === 'saveAsVarSet')  { await this.varSet.handleSaveAsVarSet(msg); }
         else if (cmd === 'clearVarSource'){ this.modeController?.clearVarSource(msg.name as string); }
+        else if (cmd === 'varsSnapshot')  { this.varsSnapshot = sanitiseVarsSnapshot(msg.values); }
     }
 
     /** Cancel: settles the batch gate `skipped` when armed (D5); else disposes as before. */

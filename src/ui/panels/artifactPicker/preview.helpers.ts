@@ -339,3 +339,33 @@ export async function persistBlockCode(opts: {
         return undefined;
     }
 }
+
+/** Keys that would reach `Object.prototype` if copied onto a plain `{}`. */
+const UNSAFE_SNAPSHOT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
+/**
+ * Copies a `varsSnapshot` payload into a null-prototype map of string values.
+ *
+ * **The keys are untrusted.** They come from `data-var` attributes rendered
+ * from vault-authored content, and the webview's `collectVars()` builds a
+ * plain `{}`, so `__proto__` / `constructor` / `prototype` would otherwise
+ * reach a host-side object. Rejected outright — never renamed or escaped into
+ * something that merely looks safe — and non-string values are dropped rather
+ * than coerced, so a hostile payload cannot smuggle an object through.
+ *
+ * @param raw - The message's `values` field, of unknown shape.
+ * @returns A null-prototype `Record<string, string>`; empty when `raw` is not an object.
+ *
+ * @example
+ * sanitiseVarsSnapshot({ 'VK-host': 'localhost', __proto__: 'x' }); // { 'VK-host': 'localhost' }
+ */
+export function sanitiseVarsSnapshot(raw: unknown): Record<string, string> {
+    const safe: Record<string, string> = Object.create(null) as Record<string, string>;
+    if (typeof raw !== 'object' || raw === null) { return safe; }
+
+    for (const [key, value] of Object.entries(raw)) {
+        if (UNSAFE_SNAPSHOT_KEYS.has(key)) { continue; }
+        if (typeof value === 'string') { safe[key] = value; }
+    }
+    return safe;
+}

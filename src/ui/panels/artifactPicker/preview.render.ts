@@ -109,10 +109,6 @@ ${styleLinkTags(cssUri)}
   <div class="slabel">Variables</div>
   <div id="varsSection">
     <div class="inputs" id="varInputs">${inputsHtml}</div>
-    <div class="actions varset-actions">
-      <button class="btn btn-secondary" id="applyVarSetBtn">Apply Variable Set</button>
-      <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
-    </div>
   </div>
   <div class="vars-resize-handle" id="varsResizeHandle" role="separator" aria-orientation="horizontal"
        aria-label="Resize the variables section" tabindex="0"></div>

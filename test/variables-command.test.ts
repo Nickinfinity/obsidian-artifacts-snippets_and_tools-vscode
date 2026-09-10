@@ -110,7 +110,11 @@ suite('buildVariableCommandIds (T16)', () => {
             contributes: { commands: { command: string }[] };
         };
         const expected = pkg.contributes.commands.map(c => c.command).filter(id => id.startsWith('obsidian-artifacts.variables.'));
-        assert.strictEqual(expected.length, 9, `expected 9 declared ids, found ${expected.length}`);
+        // Derivation-sourced, not a second hardcoded count: W1 (H1.1) took this
+        // from 9 to 11 and a literal here would have to be edited by every wave
+        // that adds a command — the `deepStrictEqual` below is what pins the set.
+        assert.strictEqual(expected.length, buildVariableCommandIds().length,
+            `manifest declares ${expected.length} variables.* ids, derivation yields ${buildVariableCommandIds().length}`);
         assert.deepStrictEqual([...buildVariableCommandIds()].sort(), [...expected].sort());
     });
 });

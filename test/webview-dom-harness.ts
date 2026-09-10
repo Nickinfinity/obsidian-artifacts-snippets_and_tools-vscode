@@ -42,7 +42,7 @@ function kebabCase(prop: string): string {
  * and `querySelector`/`querySelectorAll` all resolve to the *same* instance until an
  * ancestor's `innerHTML` is reassigned, which drops this subtree and mints new instances.
  */
-class ElementStub {
+export class ElementStub {
     children: ElementStub[] = [];
     parentElement: ElementStub | null = null;
     value: string;
@@ -62,6 +62,13 @@ class ElementStub {
         private readonly registry: Map<string, ElementStub>,
     ) {
         this.value = attrs.value ?? '';
+        // A real DOM reflects a seeded `style="display:none;"` attribute into
+        // `.style.display` immediately — this stub didn't (Finding #25), so a
+        // restore round-trip reported a hidden button as visible.
+        if (attrs.style) {
+            const m = /display\s*:\s*([^;]+)/.exec(attrs.style);
+            if (m) { this.style.display = m[1].trim(); }
+        }
         this.dataset = new Proxy({} as Record<string, string>, {
             get: (_t, prop: string): string => this.attrs[`data-${kebabCase(prop)}`],
             set: (_t, prop: string, val: string): boolean => {
@@ -260,8 +267,8 @@ function permissiveStub(): Record<string, unknown> {
 
 /** The handle a test drives a running client script through. */
 export interface WebviewDom {
-    /** Looks up the current live element for a selector (`#id`, `.class`, `[attr]`, `[attr="value"]`). */
-    el(selector: string): unknown;
+    /** Looks up the current live element for a selector (`#id`, `.class`, `[attr]`, `[attr="value"]`) — `null` if absent, so a test's `.value`/`.textContent`/`.classList` read needs no call-site cast. */
+    el(selector: string): ElementStub | null;
     /** Dispatches a DOM event at `target`, bubbling through `parentElement` — supports delegated listeners. */
     fire(target: unknown, type: string): void;
     /** Delivers a `window.addEventListener('message', ...)` event, as the extension host would post one. */
@@ -361,10 +368,6 @@ const PREVIEW_SEED_HTML = `
         <label for="v-VK-host">Host</label>
         <input id="v-VK-host" data-var="VK-host" type="text" value="" placeholder="Host">
       </div>
-    </div>
-    <div class="actions varset-actions">
-      <button class="btn btn-secondary" id="applyVarSetBtn">Apply Variable Set</button>
-      <button class="btn btn-secondary" id="saveAsVarSetBtn" style="display:none;">Save as Variable Set</button>
     </div>
   </div>
   <button id="insertBtn">Insert</button>

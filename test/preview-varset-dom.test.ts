@@ -3,47 +3,44 @@ import { makePreviewDom } from './webview-dom-harness.js';
 
 /**
  * Proves the preview's variable-set flow survives its own `#varsSection`
- * innerHTML round-trip (Apply → diff view → Cancel/Apply).
+ * innerHTML round-trip (diff view → Cancel → re-apply).
  *
- * The defect: `PREVIEW_CLIENT_JS` binds `#applyVarSetBtn` / `#saveAsVarSetBtn`
- * click listeners, and the `input` listener that clears a var-set `from:`
- * badge, directly to the nodes present at script load. `showDiffView` /
- * `restoreVarsView` replace `#varsSection`'s children wholesale on every
- * diff-view swap, which mints *new* nodes for those same ids — the old,
- * listener-bearing nodes are simply gone. One round-trip (Apply → cancel the
- * diff) is enough to kill Apply, Save, and the badge-clearing input listener.
+ * The defect this guards: `PREVIEW_CLIENT_JS`'s `input` listener that clears
+ * a var-set `from:` badge is delegated from `#varsSection` (which is never
+ * itself replaced), not bound to `#varInputs`'s children directly (which
+ * *are* replaced wholesale on every diff-view swap via `showDiffView` /
+ * `restoreVarsView`, minting fresh nodes each time). A direct bind would die
+ * the moment one round-trip happened.
  *
  * `test/webview-script-executes.test.ts` cannot see this: its stub returns a
  * fresh, disposable element from every `getElementById`, so it never notices
  * a listener bound to a node that later stops being "the" `#id` node.
  * `webview-dom-harness.ts` models identity and the innerHTML round-trip
  * precisely so this defect is reachable.
+ *
+ * T1.2 removed the `#applyVarSetBtn` / `#saveAsVarSetBtn` click wiring
+ * (the trigger moved to the Variables pane — see `preview-varset-script.test.ts`),
+ * so this file's own diff-view round-trip is driven directly via `dispatch`
+ * instead of through a button click that no longer exists.
  */
 suite('preview var-set flow survives its own innerHTML round-trip', () => {
 
     test('harness self-check: innerHTML replacement mints a new element identity', () => {
         const dom = makePreviewDom();
-        const before = dom.el('#applyVarSetBtn');
+        const before = dom.el('#varInputs');
         dom.dispatch({ command: 'showVarSetDiff', html: '<button id="varSetApplyBtn"></button>' });
         dom.dispatch({ command: 'varSetCancelled' });
         assert.notStrictEqual(
-            dom.el('#applyVarSetBtn'), before,
+            dom.el('#varInputs'), before,
             'the harness does not model identity replacement - every later assertion is decorative',
         );
     });
 
-    test('Apply survives a diff round-trip, and the badge-clearing input listener still posts after', () => {
+    test('the badge-clearing input listener still posts after a diff round-trip', () => {
         const dom = makePreviewDom();
 
-        dom.fire(dom.el('#applyVarSetBtn'), 'click');
         dom.dispatch({ command: 'showVarSetDiff', html: '<button id="varSetApplyBtn"></button>' });
         dom.dispatch({ command: 'varSetCancelled' });
-        dom.fire(dom.el('#applyVarSetBtn'), 'click');
-
-        assert.strictEqual(
-            dom.posted.filter((m) => m.command === 'pickVarSet').length, 2,
-            'the second Apply click posted nothing - its listener died with the replaced DOM',
-        );
 
         // Continuation of the exact sequence above, same dom/script instance — load-bearing.
         // Standalone (no prior diff swap) this assertion is green today: restoreVarsView

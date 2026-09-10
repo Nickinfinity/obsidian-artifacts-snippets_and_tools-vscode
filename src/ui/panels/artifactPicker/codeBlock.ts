@@ -3,6 +3,16 @@ import { WEBVIEW_ESC_LBL_JS } from './webviewSnippets.js';
 import { CODE_BLOCK_MIN_LINES } from '../../../types/constants.js';
 
 /**
+ * Debounce window (ms) shared by the code area's local re-render and the
+ * preview panel's `varsSnapshot` post — both were the same bare `150`
+ * literal in two places before this constant existed.
+ *
+ * @example
+ * setTimeout(fn, INPUT_DEBOUNCE_MS);
+ */
+export const INPUT_DEBOUNCE_MS = 150;
+
+/**
  * Builds the contenteditable code-block HTML fragment.
  *
  * The wrapper carries the `editable` modifier so it gets the editor border /
@@ -141,7 +151,7 @@ export const CODE_BLOCK_CLIENT_JS = /* javascript */ String.raw`${WEBVIEW_ESC_LB
       const caret = getCaretOffset();
       codeWrapper.innerHTML = renderRows(code);
       setCaretOffset(caret);
-    }, 150);
+    }, ${INPUT_DEBOUNCE_MS});
   }
   codeWrapper.addEventListener('input', scheduleRender);
   codeWrapper.addEventListener('keydown', function (ev) {

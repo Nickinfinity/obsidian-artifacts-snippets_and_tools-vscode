@@ -1,4 +1,4 @@
-import { CODE_BLOCK_CLIENT_JS } from './codeBlock.js';
+import { CODE_BLOCK_CLIENT_JS, INPUT_DEBOUNCE_MS } from './codeBlock.js';
 
 /**
  * Client-side JavaScript bundle for the interactive artifact preview popup.
@@ -8,20 +8,22 @@ import { CODE_BLOCK_CLIENT_JS } from './codeBlock.js';
  * (see `preview.render.ts:renderPreviewHtml`). Includes `CODE_BLOCK_CLIENT_JS`
  * first (which also carries the shared `esc`/`lbl` helpers — see
  * `webviewSnippets.ts`), then layers in preview-panel-specific interactivity:
- * variable inputs, Insert/Edit/Cancel buttons, and the Variable-Set apply/
- * save flow.
+ * variable inputs, Insert/Edit/Cancel buttons, and the Variable-Set diff
+ * protocol. The Apply/Save-as *triggers* live in the Variables pane now —
+ * this script no longer posts `pickVarSet` or `saveAsVarSet`.
  *
  * Responsibilities:
  * 1. Include CODE_BLOCK_CLIENT_JS — exposes `window.__codeBlock` + shared
  *    `esc`/`lbl`.
  * 2. Collect `[data-var]` input values; wire Insert/Copy/Edit/
  *    Cancel buttons and Ctrl/Cmd+Enter to Insert.
- * 3. Apply/Save-as Variable Set buttons; clears a var's `from:` badge on
- *    manual edit.
+ * 3. Post a debounced `varsSnapshot` on every var-input edit — the host's
+ *    only channel for what the user typed — and clear a var's `from:` badge
+ *    on manual edit.
  * 4. `updateVars` / `fileUpdated` messages → rebuild the variable inputs,
  *    preserving already-typed values.
  * 5. `showVarSetDiff` / `varSetApplied` / `varSetCancelled` messages → diff
- *    preview swap-in/restore.
+ *    preview swap-in/restore (the diff protocol itself is unchanged).
  *
  * @example
  * panel.webview.html = `<script nonce="${nonce}">(function(){
@@ -133,31 +135,28 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     });
   }
 
-  // ── Variable-set buttons ─────────────────────────────────────────────────
-  let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
-
-  function refreshSaveBtn() {
-    const btn = document.getElementById('saveAsVarSetBtn');
-    if (!btn) { return; }
-    const hasValue = Object.values(collectVars()).some(function (v) { return v && v.length > 0; });
-    btn.style.display = hasValue ? '' : 'none';
+  // ── Variables values channel ─────────────────────────────────────────────
+  // The host has no other way to learn what the user typed: values live only
+  // in this DOM. Debounced on the same window as the code area's own
+  // re-render so PreviewModeController.currentValues() stays cheap to read.
+  let snapshotTimer;
+  function scheduleSnapshot() {
+    if (snapshotTimer) { clearTimeout(snapshotTimer); }
+    snapshotTimer = setTimeout(function () {
+      snapshotTimer = undefined;
+      vscode.postMessage({ command: 'varsSnapshot', values: collectVars() });
+    }, ${INPUT_DEBOUNCE_MS});
   }
 
+  let savedVarsHtml = null;  // snapshot of inputs HTML used to restore on cancelApply
+
   // Delegated from #varsSection, which is never itself replaced by a diff-view
-  // swap — only its children are. A direct bind on #applyVarSetBtn /
-  // #saveAsVarSetBtn / #varInputs dies the moment showDiffView/restoreVarsView
-  // mints new nodes for those ids; delegation survives because the listener
-  // lives on the one element that never gets swapped.
+  // swap — only its children are. A direct bind on #varInputs's inputs dies
+  // the moment showDiffView/restoreVarsView mints new nodes for that id;
+  // delegation survives because the listener lives on the one element that
+  // never gets swapped. The diff view's own #varSetApplyBtn/#varSetCancelBtn
+  // are bound fresh in showDiffView below, each time it mints them.
   if (varsSection) {
-    varsSection.addEventListener('click', function (ev) {
-      const t = ev.target;
-      if (!t || !t.id) { return; }
-      if (t.id === 'applyVarSetBtn') {
-        vscode.postMessage({ command: 'pickVarSet', values: collectVars() });
-      } else if (t.id === 'saveAsVarSetBtn') {
-        vscode.postMessage({ command: 'saveAsVarSet', values: collectVars() });
-      }
-    });
     varsSection.addEventListener('input', function (ev) {
       const t = ev.target;
       if (t && t.dataset && t.dataset.var) {
@@ -169,10 +168,9 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
           vscode.postMessage({ command: 'clearVarSource', name: t.dataset.var });
         }
       }
-      refreshSaveBtn();
+      scheduleSnapshot();
     });
   }
-  refreshSaveBtn();
 
   // ── updateVars / fileUpdated incoming messages ──────────────────────────
   function rebuildVarInputs(vars) {
@@ -205,7 +203,6 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     if (!varsSection || savedVarsHtml === null) { return; }
     varsSection.innerHTML = savedVarsHtml;
     savedVarsHtml = null;
-    refreshSaveBtn();
   }
   function applyValuesAndBadges(values, subSetName, varNames) {
     restoreVarsView();
@@ -230,16 +227,14 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
       badge.textContent = 'from: ' + subSetName;
       row.appendChild(badge);
     });
-    refreshSaveBtn();
   }
 
   window.addEventListener('message', function (event) {
     const msg = event.data || {};
-    if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); refreshSaveBtn(); }
+    if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); }
     if (msg.command === 'fileUpdated' && msg.artifact) {
       window.__codeBlock.setCode(msg.artifact.code || '');
       rebuildVarInputs(msg.artifact.vars);
-      refreshSaveBtn();
     }
     if (msg.command === 'showVarSetDiff') { showDiffView(msg.html); }
     if (msg.command === 'varSetApplied')  { applyValuesAndBadges(msg.values || {}, msg.subSetName || '', msg.varNames || []); }
