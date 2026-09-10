@@ -257,7 +257,7 @@ and again as part of §9's definition of done.
 | A task's scope / `Done when` | The story's acceptance criteria in `jira-tickets.md` |
 | A task's wave membership | Its row's position in `progress.md`'s ledger |
 | A 🔒 security marking | All three files |
-| A real ticket key, once created | Every already-written commit subject that used `<KEY>` |
+| A real ticket key, once created | Every already-written commit subject that used `<KEY>` — see §8; on a ticketed plan the keys exist before wave one, so this row should never fire |
 
 **Closing-pass addendum, earned the hard way:** the pass at wave close should **grep for any
 figure the wave changed** (a line count, a test count, a sheet count, a stylesheet number) across
@@ -272,9 +272,12 @@ plausible sitting next to correct prose around it.
   commit.
 - **The affected ticket id(s) begin the commit subject** — every story/epic key the wave
   touched, before anything else, then the conventional-commit summary. Example:
-  `VSX-130 VSX-131 feat(templates): Wave 1 — pure domain`. When keys do not exist yet (Jira
-  connector unauthorized, §8), use the `<KEY>` placeholder in the same position and backfill the
-  real keys into the messages once created — never fabricate a key.
+  `VSX-130 VSX-131 feat(templates): Wave 1 — pure domain`. **The keys exist before the first
+  dispatch (§8), so the subject is literal from wave one.** A `<KEY>` placeholder is the
+  unauthorized-connector fallback only, and a wave that would commit one is not clear to
+  dispatch — backfilling means rewriting published commits, which gets worse per wave. Never
+  fabricate a key. **On a plan the user declared ticket-less (§8), there is no prefix at all** —
+  the subject is a plain `feat(scope): …`, exactly as a docs-only commit is.
 - **Push the feature branch after each wave's commit**, so the remote always reflects the last
   green wave and review can follow along. A red gate stops the wave before its commit — nothing
   half-gated is ever pushed.
@@ -740,9 +743,74 @@ Each phase is an **epic**; each task or task cluster is a **story** under it. Ti
 written into `jira-tickets.md` in creation order with: summary, description, acceptance
 criteria, parent link, and estimate.
 
-When the Atlassian connector is not authorized, the markdown file **is** the deliverable —
-tickets get created in one pass afterwards. Do not block plan authoring on connector auth,
-and never fabricate ticket keys; leave `<KEY>` placeholders and fill them after creation.
+### Create the tickets while the plan is being written — not after execution starts
+
+**The tickets are created in one pass at the end of authoring, before the first wave is ever
+dispatched.** `jira-tickets.md` is written first, as the spec; creating the real issues from it
+is the **last authoring step**, alongside the final consistency pass — not a chore deferred to
+PR time. Every wave's `Commit` line in `plan.md` then carries its **real** keys from the
+outset, and no wave ever commits a placeholder.
+
+**Why this is a rule and not a preference.** A `<KEY>` in a commit subject is only fixable by
+rewriting that commit. One wave in, that is a single `--amend` plus a force-push; six waves in,
+it is seven rewrites, and this environment has no `git rebase -i`. The cost of the deferral is
+paid at the worst possible moment — right before the PR, on a branch someone may already have
+pulled — and it grows with every wave. Creating the tickets during authoring costs one pass
+while nothing is built on it yet. **This exact sequence played out on the UI/UX improvement
+plan (2026-09-10): W0 shipped with `<KEY>`, and recovering it meant amending and force-pushing
+an already-published commit.** Cheap that time because it was one wave; the rule exists so
+there is no next time.
+
+Concretely, before the plan is handed over as runnable:
+
+1. `jira-tickets.md` is complete — every epic and story, in creation order.
+2. The issues are **created**, and the real keys recorded in `progress.md`'s key table.
+3. **Every `Commit` line in `plan.md` carries its wave's real keys** — including the waves that
+   will not run for weeks. A future wave must never have to remember to swap a placeholder.
+4. The three files agree on the mapping (§2's consistency pass).
+
+**The only exception is an unauthorized Atlassian connector**, and it is a deferral of hours,
+not of waves. When the connector cannot run, the markdown file **is** the deliverable and
+`<KEY>` placeholders stand — but the plan is then **not clear to dispatch a wave that will
+commit**. Authoring stops, the blocker is reported to the user in one line, and the tickets are
+created as soon as auth is available. Never fabricate a key to get past this; a fabricated key
+points at someone else's issue or at nothing, and both are worse than a placeholder.
+
+**Where the keys are not adjacent, say so.** Creating epics before their stories interleaves
+the numbering — an epic at `VSX-248` can own stories at `VSX-251`/`VSX-252`. The mapping table
+in `progress.md` is the authority; a plan that leaves the reader to infer keys from the
+numbering has a bug.
+
+### The user can decline tickets for a plan, and then none of this applies
+
+**Everything above is the default, not a mandate.** If the user says this plan carries no Jira
+tickets, it carries none — do not create them, do not write `jira-tickets.md`, and do not leave
+`<KEY>` in a single commit subject. A ticket-less plan is **two files**, `plan.md` and
+`progress.md`, and the "one document in three projections" rule (§2) reads as two.
+
+What changes, concretely:
+
+| | Ticketed plan (default) | Ticket-less plan (user opted out) |
+|---|---|---|
+| `jira-tickets.md` | written, then created in Jira | **absent** — its absence is the record, plus the §1 line below |
+| Commit subject | real keys lead it | **no id prefix at all** — a plain `feat(scope): Wave N — …` |
+| `progress.md` key table | the mapping | **replaced** by the one-line reason it does not exist |
+| PR checklist | lists epic + every story | **drops** both ticket lines |
+
+**Record the decision, never let it be silent.** A plan with no tickets and no explanation is
+indistinguishable from a plan whose author forgot them — and the next reader will "fix" it. So
+the plan's §1 instance parameters carry an explicit row:
+
+```
+| Ticketing | **None** — the user declined Jira for this plan on <date>. No `jira-tickets.md`,
+              no id prefix on any commit subject, and the PR checklist's ticket lines are removed.
+```
+
+**Ask once, early, and only if it is genuinely open.** Ticketing is an authoring-time question
+belonging with the other §1 parameters, not something to raise at the first commit. If a repo
+or a user has an established answer, use it and say which; a one-line confirmation beats a
+blocking question. And a mid-plan switch **to** ticket-less is fine going forward but never
+rewrites history: commits already carrying real keys keep them.
 
 **Documentation-only changes need no ticket.** Editing `CLAUDE.md`, `CREATING_A_PLAN.md`,
 `ARTIFACT_FILE_FORMAT.md`, `CHANGELOG.md`, a `README`, a `docs/` file, or any other prose/docs
@@ -802,12 +870,20 @@ Before any agent is dispatched, the plan must satisfy:
       (§5.3.3) — the authoring agent stops and asks for each pass by name and scope, and
       never chains A → B → A on its own.
 - [ ] Per-wave commit **and push** is encoded: the orchestrator commits once per wave with the
-      affected ticket id(s) leading the subject (`<KEY>` until keys exist), then pushes the
-      feature branch. Docs-only changes are exempt from the ticket prefix (§8).
+      affected ticket id(s) leading the subject, then pushes the feature branch. Docs-only
+      changes are exempt from the ticket prefix (§8).
+- [ ] **Ticketing is settled and recorded** (§8) — either the Jira tickets are **created** and
+      every wave's `Commit` line carries its real keys (including waves that will not run for
+      weeks), or the plan's §1 carries the explicit "Ticketing: None" row and no commit subject
+      has an id prefix. Creating them is the last authoring step, not a PR-time chore: a
+      placeholder is only fixable by rewriting a published commit, and the cost grows with every
+      wave. Unauthorized connector is the sole *involuntary* exception, and it blocks dispatch
+      rather than being carried forward silently.
 - [ ] The plan is **not executed on creation** — authoring stops and waits for the user's
       explicit go-ahead (standing rule at the top of this file).
 - [ ] The plan's PR checklist requires the **PR description to list the affected Jira tickets**
-      (the epic and its stories) — see §8.
+      (the epic and its stories) — see §8. **Omitted entirely on a ticket-less plan**, where the
+      §1 "Ticketing: None" row is what the PR reader needs instead.
 - [ ] The plan encodes the **companion-artifact consistency pass** (§2, "Wave discipline — the
       review loop") at both ends of every wave, including the closing-pass grep for any figure
       the wave changed across all three files.
