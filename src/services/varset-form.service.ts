@@ -1,0 +1,117 @@
+/**
+ * Adapter between the variable-set creation **form** payload and the
+ * existing `.md` emission pipeline.
+ *
+ * There is no `renderVarSetFile` and this module must never grow one: the
+ * one `.md` emitter is `serializeArtifact` (`artifact-serializer.service.ts`),
+ * already wrapped for this file type by `variables-writer.service.ts`
+ * (`renderVariablesFile` / `writeVariablesFile`), and the one model builder
+ * is `buildVarSetModel` (`varset.service.ts`). This module only adapts a
+ * webview payload into calls onto those two.
+ */
+import { buildVarSetModel } from './varset.service.js';
+import { slugify } from './filename.service.js';
+import type { ArtifactFormModel } from '../types/artifact-form.types.js';
+import type { VarSetFormPayload } from '../types/varset.types.js';
+
+/** Result of {@link validateVarSetForm} — mirrors the codebase's standing `{ ok } | { ok: false, reason }` shape. */
+export type VarSetFormValidation = { ok: true } | { ok: false; reason: string };
+
+/** A variable name or value containing any of these would break out of the `vks` fence it is emitted into verbatim. */
+const FENCE_BREAKING_RE = /[\n`]/;
+/** Variable *names* additionally cannot contain `=` — it is the `vksFence` `name=value` separator. */
+const NAME_EQUALS_RE = /=/;
+
+/**
+ * Slugs a variable-set title into a filename stem, falling back to a
+ * dedicated default when the title has no slug-able characters.
+ *
+ * Deliberately **not** `filename.service.ts`'s `deriveFileName` — that
+ * falls back to `'untitled'`, while the save-as-variable-set flow being
+ * preserved here (`varSetController.ts:200`) has always fallen back to
+ * `'untitled-variable-set'`. Collapsing the two would change the on-disk
+ * filename for a punctuation-only title.
+ *
+ * @param title - Raw, untrimmed title as typed in the form.
+ * @returns A filesystem-safe slug, or `'untitled-variable-set'` when empty.
+ *
+ * @example
+ * slugForVarSet('Local Dev'); // → 'local-dev'
+ * slugForVarSet('...');       // → 'untitled-variable-set'
+ *
+ * ponytail: passes the title to `slugify` **untrimmed** — faithfully
+ * mirroring the old flow (`varSetController.ts:205` slugged untrimmed while
+ * `:203` trimmed only for the model). Correct today only because `slugify`
+ * strips leading/trailing dashes itself (`SLUG_TRIM_DASH_RE`,
+ * filename.service.ts:18,145) — a silent dependency on another module's
+ * internals, with no test that fails if that stripping ever changes.
+ * Upgrade path if it bites: assert this parity directly in
+ * `filename.service.test.ts` (or trim here explicitly once nothing else
+ * depends on matching the old flow's exact bytes).
+ */
+export function slugForVarSet(title: string): string {
+    const slug = slugify(title);
+    return slug.length > 0 ? slug : 'untitled-variable-set';
+}
+
+/**
+ * Validates a `VarSetFormPayload` before it is ever turned into a model or
+ * written to disk.
+ *
+ * **Rejects, never sanitises** — matching every other trust-boundary guard
+ * in this codebase. Two independent hazards are checked:
+ *   - an empty (post-trim) title, so `slugForVarSet` never has to guess intent;
+ *   - a variable *name* or *value* that would break out of the ` ```vks `
+ *     fence it is emitted into verbatim (`vksFence`, `artifact-serializer.service.ts`) —
+ *     a newline or backtick in either half, or an `=` in a name (the
+ *     `name=value` separator). `=` and backtick-free content in a **value**
+ *     is legal (see the `equals` / `quotes` goldens) and must not be rejected.
+ *
+ * @param payload - Form payload as posted from the webview (untrusted shape assumed already checked upstream).
+ * @returns `{ ok: true }` when safe to write, `{ ok: false, reason }` otherwise.
+ *
+ * @example
+ * validateVarSetForm({ title: 'Local Dev', description: '', tags: [], pairs: [['VK-host', 'localhost']] });
+ * // → { ok: true }
+ */
+export function validateVarSetForm(payload: VarSetFormPayload): VarSetFormValidation {
+    if (payload.title.trim().length === 0) {
+        return { ok: false, reason: 'Name cannot be empty.' };
+    }
+
+    for (const [name, value] of payload.pairs) {
+        if (FENCE_BREAKING_RE.test(name) || NAME_EQUALS_RE.test(name)) {
+            return { ok: false, reason: `Variable name "${name}" contains an illegal character (newline, backtick, or =).` };
+        }
+        if (FENCE_BREAKING_RE.test(value)) {
+            return { ok: false, reason: `Value for "${name}" contains an illegal character (newline or backtick).` };
+        }
+    }
+
+    return { ok: true };
+}
+
+/**
+ * Converts a form payload into the `ArtifactFormModel` the existing writer
+ * pipeline expects — the thin adapter this task owns.
+ *
+ * Trims `title`/`description` exactly as the prompt flow being replaced did
+ * (`title.trim()` / `description.trim()` at `varSetController.ts:198`),
+ * otherwise a padded input would emit a padded frontmatter value and break
+ * the byte-identity contract with the golden files.
+ *
+ * @param payload - Validated form payload.
+ * @returns A single-block `artifactType: Variables` model, ready for `renderVariablesFile` / `writeVariablesFile`.
+ *
+ * @example
+ * toVarSetModel({ title: ' Local Dev ', description: '', tags: [], pairs: [['VK-host', 'localhost']] });
+ * // → buildVarSetModel('Local Dev', '', [], [['VK-host', 'localhost']])
+ */
+export function toVarSetModel(payload: VarSetFormPayload): ArtifactFormModel {
+    return buildVarSetModel(
+        payload.title.trim(),
+        payload.description.trim(),
+        payload.tags,
+        payload.pairs,
+    );
+}

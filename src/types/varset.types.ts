@@ -82,3 +82,35 @@ export interface ApplyResult {
     /** One entry per var in the union of `current` and `set` keys. */
     changes: ApplyChange[];
 }
+
+/**
+ * The variable-set creation form's payload — what the webview form holds, and
+ * what crosses the `postMessage` boundary back to the extension.
+ *
+ * Lives here rather than beside either half of the form on purpose: the
+ * renderer/panel and the slug/validation/adapter service are built
+ * independently and both need this shape, so neither may own it.
+ *
+ * **Untrusted on the inbound path.** A payload arriving from the webview is
+ * shape-guarded before use — `pairs` entries carry user-typed variable *names*
+ * as well as values, and both halves are emitted verbatim into a ` ```vks `
+ * fence, so both are validated (rejected, never sanitised) before any write.
+ *
+ * @example
+ * const payload: VarSetFormPayload = {
+ *     title:       'Local Dev',
+ *     description: 'Dev machine settings',
+ *     tags:        ['api', 'dev'],
+ *     pairs:       [['VK-host', 'localhost']],
+ * };
+ */
+export interface VarSetFormPayload {
+    /** Set title — slugged into `Variables/<slug>.md`, and emitted as `title:`. */
+    title: string;
+    /** Optional prose context; `''` when the user left it blank. */
+    description: string;
+    /** Tags carried over from the artifact the values were captured from. */
+    tags: string[];
+    /** Editable `[name, value]` rows, in display order. */
+    pairs: [string, string][];
+}

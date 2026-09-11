@@ -1,12 +1,13 @@
 import * as vscode from 'vscode';
-import { applyVarSet, buildVarSetModel } from '../../../services/varset.service.js';
-import { serializeArtifact } from '../../../services/artifact-serializer.service.js';
-import { slugify } from '../../../services/filename.service.js';
+import { applyVarSet } from '../../../services/varset.service.js';
 import { getEntry } from '../../../services/artifact-type-config.service.js';
 import { getVaultRootUri } from '../../../services/config.service.js';
+import { writeVariablesFile } from '../../../services/variables-writer.service.js';
+import { slugForVarSet, toVarSetModel, validateVarSetForm } from '../../../services/varset-form.service.js';
 import type { ParsedArtifactFile, ParsedVar } from '../../../types/parsed-artifact.types.js';
-import type { ApplyResult } from '../../../types/varset.types.js';
+import type { ApplyResult, VarSetFormPayload } from '../../../types/varset.types.js';
 import { getVarSetScanner, pickVarSet } from '../varsetPicker.panel.js';
+import { openVarSetFormPanel } from '../varsetForm/varsetForm.panel.js';
 import { renderVarSetDiffHtml } from './varSetDiff.js';
 
 /** Callbacks the controller uses to push state back to the host preview panel. */
@@ -168,6 +169,11 @@ export class VarSetController {
         if (!artifact) { return; }
 
         const values = (msg.values as Record<string, string> | undefined) ?? {};
+        // The non-empty filter is the form's SEEDING filter, and W2 depends on
+        // it staying here. `toVarSetModel` passes `pairs` through verbatim, so
+        // a row the user deliberately blanks *in the form* is emitted as
+        // `VK-name=` — correct for an editor, but only benign because the form
+        // is never seeded with empty rows in the first place.
         const nonEmpty: [string, string][] = Object.entries(values).filter(([, v]) => v.length > 0);
         if (nonEmpty.length === 0) {
             void vscode.window.showInformationMessage('No values to save — fill at least one variable first.');
@@ -180,34 +186,76 @@ export class VarSetController {
             return;
         }
 
-        const title = await vscode.window.showInputBox({
-            prompt: 'Name for this variable set',
-            placeHolder: 'e.g. Local Development',
-            validateInput: v => v.trim().length === 0 ? 'Name cannot be empty.' : undefined,
-        });
-        if (!title) { return; }
-
-        const description = await vscode.window.showInputBox({
-            prompt: 'Description (optional)',
-            placeHolder: 'Short context for this variable set',
-        });
-        // User can dismiss the description prompt — that aborts the save flow.
-        if (description === undefined) { return; }
-
-        const tags    = artifact.frontmatter.tags ?? [];
-        const content = serializeArtifact(buildVarSetModel(title.trim(), description.trim(), tags, nonEmpty));
-        // Empty slug (a title of only punctuation) would write a bare `.md`.
-        const slug    = slugify(title) || 'untitled-variable-set';
-        const fileUri = vscode.Uri.joinPath(variablesDirUri, `${slug}.md`);
-
-        try {
-            await vscode.workspace.fs.writeFile(fileUri, new TextEncoder().encode(content));
-            getVarSetScanner().invalidate();
-            void vscode.window.showInformationMessage(`Variable set saved: ${title.trim()}`);
-        } catch (err) {
-            void vscode.window.showErrorMessage(`Failed to save variable set: ${(err as Error).message}`);
+        const vaultRoot = getVaultRootUri();
+        if (!vaultRoot) {
+            void vscode.window.showErrorMessage('Variables directory is not configured. Open the Settings panel to enable it.');
+            return;
         }
+
+        openVarSetFormPanel(
+            Object.fromEntries(nonEmpty),
+            artifact.frontmatter.tags ?? [],
+            this.extensionUri,
+            {
+                validate: validateVarSetForm,
+                write:    payload => writeVarSetFromForm(payload, vaultRoot, variablesDirUri),
+                // `post` and `close` are supplied by the panel itself — it owns
+                // the webview and its disposal. These are the inert defaults the
+                // panel overrides; see `openVarSetFormPanel`.
+                post:  () => { /* replaced by the panel */ },
+                close: () => { /* replaced by the panel */ },
+            },
+        );
     }
+}
+
+/**
+ * Writes a validated var-set form payload through the **existing** variables
+ * writer, then refreshes the scanner so the Variables tree shows the new file
+ * without a window reload.
+ *
+ * Lives here rather than in `varset-form.service.ts` because it is the wiring
+ * between two worker-owned halves (H2.1): the service owns the adapter and the
+ * validation, the panel owns the webview, and neither may reach the other. The
+ * three steps below sat inline in the old prompt flow and belong to no task.
+ *
+ * @param payload   - The validated form payload.
+ * @param vaultRoot - Vault root, for `writeArtifact`'s containment checks.
+ * @param dirUri    - The resolved `<vault>/Variables` directory.
+ * @returns Resolves once the file is written and the scanner invalidated.
+ *
+ * @example
+ * await writeVarSetFromForm(payload, vaultRoot, variablesDirUri);
+ */
+async function writeVarSetFromForm(
+    payload: VarSetFormPayload,
+    vaultRoot: vscode.Uri,
+    dirUri: vscode.Uri,
+): Promise<void> {
+    const result = await writeVariablesFile({
+        vaultRoot,
+        chosenDir: dirUri,
+        // `writeArtifact` appends `.md` itself — passing it here would write `…md.md`.
+        fileName:  slugForVarSet(payload.title),
+        model:     toVarSetModel(payload),
+    });
+
+    if (result.kind === 'success') {
+        // F5 step 4 depends on this: without it the new set is on disk but
+        // absent from the Variables tree until the window reloads (D-B).
+        getVarSetScanner().invalidate();
+        void vscode.window.showInformationMessage(`Variable set saved: ${payload.title.trim()}`);
+        return;
+    }
+
+    // `collision` is unreachable while `writeVariablesFile` hardcodes
+    // `force: true` (recorded W2 debt, upgrade path `force: false` + this arm),
+    // but it is handled rather than assumed away so tightening that flag later
+    // cannot turn a refused write into a silent no-op.
+    const reason = result.kind === 'collision'
+        ? `A variable set named "${result.filePath}" already exists.`
+        : result.message;
+    void vscode.window.showErrorMessage(`Failed to save variable set: ${reason}`);
 }
 
 // ── Module helpers ────────────────────────────────────────────────────────────
@@ -220,7 +268,7 @@ export class VarSetController {
  * @example
  * const dir = getVariablesDirUri();
  */
-function getVariablesDirUri(): vscode.Uri | null {
+export function getVariablesDirUri(): vscode.Uri | null {
     const vaultRoot = getVaultRootUri();
     if (!vaultRoot) { return null; }
     return vscode.Uri.joinPath(vaultRoot, getEntry('Variables').dir);
