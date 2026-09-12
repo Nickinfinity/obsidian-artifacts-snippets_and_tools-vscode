@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { ARTIFACTS } from '../src/types/constants.js';
 import { getCreateTypesForSurface, getIndexCapableTypes, getEntry } from '../src/services/artifact-type-config.service.js';
 import type { ArtifactType } from '../src/types/parsed-artifact.types.js';
+import { resolveNls } from './nls.helpers.js';
 
 /**
  * Drift guard: `package.json`'s create commands and menus ↔ the §2 derivation
@@ -110,9 +111,13 @@ suite('package.json create menus ↔ ARTIFACTS drift guard', () => {
 	});
 
 	test('every create command has a non-empty, distinct title', () => {
+		// Resolved values, not raw keys: a bare `%key%` satisfies a non-empty
+		// string check and a set of *keys* is trivially distinct even when two
+		// keys are mis-mapped to the same label — resolving through `resolveNls`
+		// is what actually proves the rendered titles differ.
 		const titles = PKG.contributes.commands
 			.filter(c => declaredCreateIds.has(c.command))
-			.map(c => c.title);
+			.map(c => resolveNls(c.title));
 		for (const t of titles) { assert.ok(t && t.trim().length > 0, 'empty create command title'); }
 		// A menu item's label comes ONLY from its command title, so duplicates
 		// render as two identical rows the user cannot tell apart.

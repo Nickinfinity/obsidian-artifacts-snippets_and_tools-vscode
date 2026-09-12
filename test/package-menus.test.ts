@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import { ARTIFACTS } from '../src/types/constants.js';
 import type { Artifact, ArtifactContext } from '../src/types/artifact.types.js';
 import { artifactCommandId, artifactTerminalCommandId } from '../src/commands/insert.command.js';
+import { resolveNls } from './nls.helpers.js';
 
 /**
  * Drift guard: `package.json` menu contributions ↔ `ARTIFACTS`.
@@ -100,8 +101,9 @@ suite('package.json menus ↔ ARTIFACTS drift guard', () => {
 			const id = artifactCommandId(a.dir);
 			const cmd = pkg.contributes.commands.find(c => c.command === id);
 			assert.ok(cmd, `package.json contributes.commands is missing ${id}`);
+			const resolved = resolveNls(cmd.title ?? '');
 			assert.ok(
-				typeof cmd.title === 'string' && cmd.title.length > 0,
+				typeof resolved === 'string' && resolved.length > 0,
 				`${id} has no menu title (VS Code labels the entry from this)`,
 			);
 		}
@@ -144,7 +146,7 @@ suite('package.json menus ↔ ARTIFACTS drift guard', () => {
 			const terminalCmd = pkg.contributes.commands.find(c => c.command === terminalId);
 			assert.ok(terminalCmd, `package.json contributes.commands is missing ${terminalId}`);
 			assert.strictEqual(
-				terminalCmd?.title, baseCmd?.title,
+				resolveNls(terminalCmd?.title ?? ''), resolveNls(baseCmd?.title ?? ''),
 				`${terminalId} title should mirror ${baseId} (same label, different menu id)`,
 			);
 		}

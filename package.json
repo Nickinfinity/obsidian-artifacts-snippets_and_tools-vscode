@@ -17,170 +17,170 @@
     "commands": [
       {
         "command": "obsidian-artifacts.settings",
-        "title": "Obsidian Artifacts: Settings"
+        "title": "%cmd.settings.title%"
       },
       {
         "command": "obsidian-artifacts.insert.snippets",
-        "category": "Obsidian Artifacts",
-        "title": "Insert Snippets"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.snippets.title%"
       },
       {
         "command": "obsidian-artifacts.insert.aiagentsconf",
-        "category": "Obsidian Artifacts",
-        "title": "Insert AI Agent Config"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.aiagentsconf.title%"
       },
       {
         "command": "obsidian-artifacts.insert.commands",
-        "category": "Obsidian Artifacts",
-        "title": "Insert Command"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.commands.title%"
       },
       {
         "command": "obsidian-artifacts.insert.templates",
-        "category": "Obsidian Artifacts",
-        "title": "Insert Template"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.templates.title%"
       },
       {
         "command": "obsidian-artifacts.insert.aiprompts",
-        "category": "Obsidian Artifacts",
-        "title": "Insert AI Prompt"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.aiprompts.title%"
       },
       {
         "command": "obsidian-artifacts.insert.aiprompts.terminal",
-        "category": "Obsidian Artifacts",
-        "title": "Insert AI Prompt"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.aiprompts.terminal.title%"
       },
       {
         "command": "obsidian-artifacts.insert.variables",
-        "category": "Obsidian Artifacts",
-        "title": "See/Edit Variables"
+        "category": "%cmd.category%",
+        "title": "%cmd.insert.variables.title%"
       },
       {
         "command": "obsidian-artifacts.migrateFrontmatter",
-        "title": "Obsidian Artifacts: Migrate Vault Frontmatter"
+        "title": "%cmd.migrateFrontmatter.title%"
       },
       {
         "command": "obsidian-artifacts.create.snippets",
-        "title": "Obsidian Artifacts: Create Snippet from Selection"
+        "title": "%cmd.create.snippets.title%"
       },
       {
         "command": "obsidian-artifacts.create.aiagentsconf",
-        "title": "Obsidian Artifacts: Create AI Agents Config from File"
+        "title": "%cmd.create.aiagentsconf.title%"
       },
       {
         "command": "obsidian-artifacts.create.commands",
-        "title": "Obsidian Artifacts: Create Command from Terminal"
+        "title": "%cmd.create.commands.title%"
       },
       {
         "command": "obsidian-artifacts.create.templates",
-        "title": "Obsidian Artifacts: Create Template from File"
+        "title": "%cmd.create.templates.title%"
       },
       {
         "command": "obsidian-artifacts.create.aiprompts",
-        "title": "Obsidian Artifacts: Create AI Prompt from Selection"
+        "title": "%cmd.create.aiprompts.title%"
       },
       {
         "command": "obsidian-artifacts.create.aiprompts.terminal",
-        "title": "Obsidian Artifacts: Create AI Prompt from Terminal"
+        "title": "%cmd.create.aiprompts.terminal.title%"
       },
       {
         "command": "obsidian-artifacts.create.aiagentsconf.index",
-        "title": "Obsidian Artifacts: Create AI Agents Config Index from Selection"
+        "title": "%cmd.create.aiagentsconf.index.title%"
       },
       {
         "command": "obsidian-artifacts.create.templates.index",
-        "title": "Obsidian Artifacts: Create Template Index from Selection"
+        "title": "%cmd.create.templates.index.title%"
       },
       {
         "command": "obsidian-artifacts.variables.newFile",
-        "title": "New Variables File",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.newFile.title%",
+        "category": "%cmd.category%",
         "icon": "$(new-file)"
       },
       {
         "command": "obsidian-artifacts.variables.newSubSet",
-        "title": "New Sub-Set",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.newSubSet.title%",
+        "category": "%cmd.category%",
         "icon": "$(add)"
       },
       {
         "command": "obsidian-artifacts.variables.addVar",
-        "title": "Add Variable",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.addVar.title%",
+        "category": "%cmd.category%",
         "icon": "$(add)"
       },
       {
         "command": "obsidian-artifacts.variables.editValue",
-        "title": "Edit Value",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.editValue.title%",
+        "category": "%cmd.category%",
         "icon": "$(edit)"
       },
       {
         "command": "obsidian-artifacts.variables.renameVar",
-        "title": "Rename Variable",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.renameVar.title%",
+        "category": "%cmd.category%",
         "icon": "$(edit)"
       },
       {
         "command": "obsidian-artifacts.variables.deleteVar",
-        "title": "Delete Variable",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.deleteVar.title%",
+        "category": "%cmd.category%",
         "icon": "$(trash)"
       },
       {
         "command": "obsidian-artifacts.variables.deleteSubSet",
-        "title": "Delete Sub-Set",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.deleteSubSet.title%",
+        "category": "%cmd.category%",
         "icon": "$(trash)"
       },
       {
         "command": "obsidian-artifacts.variables.deleteFile",
-        "title": "Delete Variables File",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.deleteFile.title%",
+        "category": "%cmd.category%",
         "icon": "$(trash)"
       },
       {
         "command": "obsidian-artifacts.variables.renameSubSet",
-        "title": "Rename Sub-Set",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.renameSubSet.title%",
+        "category": "%cmd.category%",
         "icon": "$(edit)"
       },
       {
         "command": "obsidian-artifacts.variables.applyToPreview",
-        "title": "Apply to Preview",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.applyToPreview.title%",
+        "category": "%cmd.category%",
         "icon": "$(symbol-variable)"
       },
       {
         "command": "obsidian-artifacts.variables.saveCurrentValues",
-        "title": "Save Current Values as Set",
-        "category": "Obsidian Artifacts",
+        "title": "%cmd.variables.saveCurrentValues.title%",
+        "category": "%cmd.category%",
         "icon": "$(save)"
       }
     ],
     "submenus": [
       {
         "id": "obsidian-artifacts.submenu.editor",
-        "label": "Obsidian Artifacts"
+        "label": "%submenu.editor.label%"
       },
       {
         "id": "obsidian-artifacts.submenu.terminal",
-        "label": "Obsidian Artifacts"
+        "label": "%submenu.terminal.label%"
       },
       {
         "id": "obsidian-artifacts.submenu.explorer",
-        "label": "Obsidian Artifacts"
+        "label": "%submenu.explorer.label%"
       },
       {
         "id": "obsidian-artifacts.submenu.create.editor",
-        "label": "Obsidian Artifacts: Create"
+        "label": "%submenu.create.editor.label%"
       },
       {
         "id": "obsidian-artifacts.submenu.create.terminal",
-        "label": "Obsidian Artifacts: Create"
+        "label": "%submenu.create.terminal.label%"
       },
       {
         "id": "obsidian-artifacts.submenu.create.explorer",
-        "label": "Obsidian Artifacts: Create"
+        "label": "%submenu.create.explorer.label%"
       }
     ],
     "menus": {
@@ -524,7 +524,7 @@
       "activitybar": [
         {
           "id": "obsidian-artifacts",
-          "title": "Obsidian Artifacts",
+          "title": "%container.title%",
           "icon": "media/obsidian-artifacts.svg"
         }
       ]
@@ -533,12 +533,12 @@
       "obsidian-artifacts": [
         {
           "id": "obsidian-artifacts.mainView",
-          "name": "Artifacts",
+          "name": "%view.mainView.name%",
           "type": "webview"
         },
         {
           "id": "obsidian-artifacts.variablesView",
-          "name": "Variables"
+          "name": "%view.variablesView.name%"
         }
       ]
     },
@@ -546,72 +546,72 @@
       {
         "view": "obsidian-artifacts.mainView",
         "when": "!obsidian-artifacts.vaultConfigured",
-        "contents": "Choose your Obsidian vault to start creating and inserting artifacts.\n[Choose Vault Folder](command:obsidian-artifacts.settings)"
+        "contents": "%viewsWelcome.mainView.contents%"
       },
       {
         "view": "obsidian-artifacts.variablesView",
         "when": "!obsidian-artifacts.vaultConfigured",
-        "contents": "Variable sets live in your vault's Variables folder.\n[Choose Vault Folder](command:obsidian-artifacts.settings)"
+        "contents": "%viewsWelcome.variablesView.contents%"
       }
     ],
     "configuration": {
-      "title": "Obsidian Artifacts: AI Snippets & Tools",
+      "title": "%config.title%",
       "properties": {
         "obsidianArtifacts.vaultPath": {
           "type": "string",
           "default": "",
-          "description": "Absolute path to the Obsidian vault root directory. Must contain a .obsidian folder.",
+          "description": "%config.obsidianArtifacts.vaultPath.description%",
           "scope": "machine-overridable"
         },
         "obsidianArtifacts.defaultEnvironment": {
           "type": "string",
           "default": "",
-          "description": "Default environment identifier (reserved for future use).",
+          "description": "%config.obsidianArtifacts.defaultEnvironment.description%",
           "scope": "language-overridable"
         },
         "obsidianArtifacts.features.snippets": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the Snippets directory. Auto-created on first vault selection."
+          "description": "%config.obsidianArtifacts.features.snippets.description%"
         },
         "obsidianArtifacts.features.aiagentsconf": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the AI Agents Config directory. Auto-created on first vault selection."
+          "description": "%config.obsidianArtifacts.features.aiagentsconf.description%"
         },
         "obsidianArtifacts.features.commands": {
           "type": "boolean",
           "default": false,
-          "description": "Enable the Commands directory (terminal context menu)."
+          "description": "%config.obsidianArtifacts.features.commands.description%"
         },
         "obsidianArtifacts.features.templates": {
           "type": "boolean",
           "default": false,
-          "description": "Enable the Templates directory (Explorer context menu — Insert Template)."
+          "description": "%config.obsidianArtifacts.features.templates.description%"
         },
         "obsidianArtifacts.features.aiprompts": {
           "type": "boolean",
           "default": true,
-          "description": "Enable the AI Prompts directory. Auto-created on first vault selection."
+          "description": "%config.obsidianArtifacts.features.aiprompts.description%"
         },
         "obsidianArtifacts.features.variables": {
           "type": "boolean",
           "default": false,
-          "description": "Enable the Variables directory (appears in all context menus)."
+          "description": "%config.obsidianArtifacts.features.variables.description%"
         },
         "obsidianArtifacts.mainPane.previewWidthSteps": {
           "type": "number",
           "default": 3,
           "minimum": 0,
           "maximum": 20,
-          "description": "How far the sidebar widens when a preview opens, counted in widen steps. This is a step count and not a width because VS Code exposes no API to set or read a view's width — the same number of narrow steps is applied when the preview ends, which restores the previous width without ever reading it. Set 0 to disable the resize."
+          "description": "%config.obsidianArtifacts.mainPane.previewWidthSteps.description%"
         },
         "obsidianArtifacts.mainPane.variablesHeightFraction": {
           "type": "number",
           "default": 0.1667,
           "minimum": 0.05,
           "maximum": 0.5,
-          "description": "Height of the preview's variables section as a fraction of the pane height (default 0.1667 — one sixth). Minimum 0.05, maximum 0.5. Dragging the section's resize handle updates this value."
+          "description": "%config.obsidianArtifacts.mainPane.variablesHeightFraction.description%"
         }
       }
     }
