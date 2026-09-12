@@ -135,6 +135,36 @@ suite('preview client script ↔ rendered buttons', () => {
             'code-block.css hard-codes a line count instead of reading the property',
         );
     });
+
+    /**
+     * `#overwriteBtn` ships with a `hidden` attribute, but that attribute alone
+     * does NOT hide it: `base.css:15`'s bare `button { display: inline-flex }`
+     * is an **author** rule and beats the UA's `[hidden] { display: none }`
+     * regardless of specificity. Without an explicit override the button is
+     * visible the moment a preview opens, before any edit — which is exactly
+     * what was reported, and why every JS-side fix to `markStaged` changed
+     * nothing: the attribute was always being set correctly.
+     *
+     * Same mechanism `main-pane.css`'s `.create-row[hidden]` and
+     * `#idleFilterClear[hidden]` rules exist for. `.dirty-notice` needs no such
+     * rule — it is a `<div>`, so the UA rule applies to it untouched.
+     */
+    test('code-block.css hides #overwriteBtn when the hidden attribute is set', () => {
+        const sheet = fs.readFileSync(
+            path.join(__dirname, '..', '..', 'src', 'ui', 'code-block.css'),
+            'utf8',
+        );
+        const rule = /#overwriteBtn\[hidden\]\s*\{([^}]*)\}/.exec(sheet);
+        assert.ok(
+            rule,
+            'no #overwriteBtn[hidden] rule — base.css\'s bare button{display:inline-flex} '
+            + 'beats the UA [hidden] rule, so Overwrite is visible before any edit',
+        );
+        assert.ok(
+            /display:\s*none/.exec(rule![1]),
+            '#overwriteBtn[hidden] exists but does not set display:none',
+        );
+    });
 });
 
 suite('preview markup no longer carries the var-set buttons (T1.1)', () => {

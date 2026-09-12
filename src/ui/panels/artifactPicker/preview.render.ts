@@ -3,7 +3,7 @@ import { escHtml, styleLinkTags } from '../../../utils/html.js';
 import { buildCodeBlockHtml } from './codeBlock.js';
 import { PREVIEW_CLIENT_JS } from './preview.clientJs.js';
 import { labelForVar, popupShell } from './preview.helpers.js';
-import { writesWholeFile } from '../../../services/artifact-type-config.service.js';
+import { writesWholeFile, isTerminalOnly } from '../../../services/artifact-type-config.service.js';
 
 // ── Var-merge helper ─────────────────────────────────────────────────────────
 
@@ -43,10 +43,15 @@ export function mergeVarsWithDefaults(raw: Record<string, string>, vars: ParsedV
  * @param cssUri       - Webview URI for the shared stylesheet.
  * @param cspSource    - Webview CSP source token.
  * @param varSources   - `{ varName → setName }` map for `from:` badges (Variable Sets).
+ * @param insertAvailable - Whether an editor tab is open to insert into. Only
+ *   gates types that actually need one: a `writesWholeFile` type writes to the
+ *   workspace ("Create File") and a terminal-bound type sends to the terminal,
+ *   so both keep their button regardless. Defaults to `true` so every existing
+ *   call site renders exactly as before.
  * @returns Complete HTML document string.
  *
  * @example
- * renderPreviewHtml(artifact, codeRowsHtml, nonce, cssUri, cspSource, {})
+ * renderPreviewHtml(artifact, codeRowsHtml, nonce, cssUri, cspSource, {}, false)
  */
 export function renderPreviewHtml(
     a: ParsedArtifactFile,
@@ -55,6 +60,7 @@ export function renderPreviewHtml(
     cssUri: string | string[],
     cspSource: string,
     varSources: Record<string, string> = {},
+    insertAvailable = true,
 ): string {
     const e = escHtml;
     const title    = e(a.frontmatter.title || a.fileName);
@@ -69,7 +75,17 @@ export function renderPreviewHtml(
     // type inserts at the cursor (Insert). `writesWholeFile` is the ONLY per-type
     // rendering difference and the single source shared with the insert handler —
     // the byte-exact golden for a snippet is the tripwire that it did not leak wider.
-    const primaryLabel = writesWholeFile(a.frontmatter.artifactType) ? 'Create File' : 'Insert';
+    const writesFile   = writesWholeFile(a.frontmatter.artifactType);
+    const primaryLabel = writesFile ? 'Create File' : 'Insert';
+    // Only editor-bound types are gated. A whole-file type writes into the
+    // workspace and a terminal-bound type sends to the terminal — neither needs
+    // an editor, so hiding their button would make them uninsertable. The
+    // terminal case is covered by `needsEditor` below rather than re-deriving
+    // `resolveInsertTarget` here: that resolver needs an invocation surface the
+    // renderer does not have, and `contexts: ['terminal']` is the only row that
+    // never routes to an editor.
+    const needsEditor  = !writesFile && !isTerminalOnly(a.frontmatter.artifactType);
+    const insertHidden = needsEditor && !insertAvailable ? ' hidden' : '';
 
     const inputsHtml = a.vars.length > 0
         ? a.vars.map(v => {
@@ -113,7 +129,7 @@ ${styleLinkTags(cssUri)}
   <div class="vars-resize-handle" id="varsResizeHandle" role="separator" aria-orientation="horizontal"
        aria-label="Resize the variables section" tabindex="0"></div>
   <div class="actions">
-    <button class="btn btn-insert"    id="insertBtn">${primaryLabel}</button>
+    <button class="btn btn-insert"    id="insertBtn"${insertHidden}>${primaryLabel}</button>
     <button class="btn btn-secondary" id="copyBtn">Copy</button>
     <button class="btn btn-secondary" id="overwriteBtn" hidden>Overwrite</button>
     <button class="btn btn-secondary" id="editBtn">Edit</button>

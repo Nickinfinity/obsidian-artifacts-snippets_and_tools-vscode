@@ -147,6 +147,24 @@ export function resolveInsertTarget(type: ArtifactType, invocationSurface: Invoc
     return 'editor';
 }
 
+/**
+ * Answers whether there is an editor tab open to insert into.
+ *
+ * `visibleTextEditors`, deliberately **not** `activeTextEditor`: the latter is
+ * focus-sensitive and goes `undefined` whenever a webview takes focus, so a
+ * button gated on it would vanish exactly while the user is working in the
+ * preview pane. "A tab is open" is the question Insert actually depends on,
+ * and it is focus-independent.
+ *
+ * @returns `true` when at least one text editor is visible in the workbench.
+ *
+ * @example
+ * hasVisibleEditor(); // → false in an empty workbench, true with any file open
+ */
+export function hasVisibleEditor(): boolean {
+    return vscode.window.visibleTextEditors.length > 0;
+}
+
 /** Bracketed-paste start marker — tells the receiving program "literal text follows". */
 const BRACKETED_PASTE_START = '\x1b[200~';
 /** Bracketed-paste end marker. */
@@ -293,11 +311,12 @@ export async function performInsert(
         editor.edit(edit => edit.insert(editor.selection.active, content));
         return;
     }
-    // Await rather than fire-and-forget: the toast must not claim a copy that
-    // failed (the clipboard is unavailable on some remote hosts), and this
-    // function is already async for the terminal confirmation.
-    await vscode.env.clipboard.writeText(content);
-    vscode.window.showInformationMessage('Obsidian Artifacts: No active editor — content copied to clipboard.');
+    // No clipboard fallback: Copy is a dedicated button beside Insert and
+    // resolves identically, so a silent copy here was one button doing two
+    // different things depending on state the user cannot see. The preview
+    // hides Insert outright when no editor is open, so this is now only
+    // reachable if the last editor closed between render and click.
+    vscode.window.showWarningMessage('Obsidian Artifacts: No editor open to insert into. Use Copy instead.');
 }
 
 /**

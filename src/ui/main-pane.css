@@ -13,10 +13,63 @@
  * none idle mode loads, so nothing here needs to touch it either.
  */
 
+/*
+ * Positioning context for the overlaid clear button. The margin moves here
+ * from `#idleFilter` so the wrapper owns the gap below the field — leaving it
+ * on the input would put the spacing inside the positioning box and push the
+ * button's centreline 10px above the input's.
+ */
+.idle-filter-wrap {
+  position: relative;
+  display: block;
+  margin-bottom: 10px;
+}
+
+/*
+ * `<input type="search">` would give a clear affordance for free, but its
+ * `::-webkit-search-cancel-button` cannot take a VS Code theme token and is
+ * hidden by default in this Chromium, so it would render either invisibly or
+ * off-theme. A real button is the smallest thing that actually works here.
+ */
+#idleFilterClear {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  padding: 0;
+  background: transparent;
+  color: var(--vscode-input-foreground);
+  border: none;
+  border-radius: 0;
+  opacity: 0.7;
+  cursor: pointer;
+}
+
+#idleFilterClear:hover {
+  background: var(--vscode-toolbar-hoverBackground, transparent);
+  opacity: 1;
+}
+
+/*
+ * Same 0-2-0 override the `.create-row[hidden]` rule below exists for, and for
+ * the same reason: `base.css`'s bare `button { display: inline-flex }` is an
+ * author rule that beats the UA's `[hidden] { display: none }`. Without this
+ * the button is visible on an empty filter, which is exactly when it should
+ * not be.
+ */
+#idleFilterClear[hidden] {
+  display: none;
+}
+
 #idleFilter {
   width: 100%;
-  margin-bottom: 10px;
-  padding: 5px 8px;
+  /* Room for the overlaid clear button, so a long filter string never runs
+     underneath it. */
+  padding: 5px 30px 5px 8px;
   background: var(--vscode-input-background);
   color: var(--vscode-input-foreground);
   border: 1px solid var(--vscode-input-border, transparent);

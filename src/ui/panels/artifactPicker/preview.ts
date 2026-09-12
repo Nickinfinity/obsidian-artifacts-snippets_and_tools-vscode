@@ -1,13 +1,13 @@
 import * as vscode from 'vscode';
 import { parseFromContent, resolveVars } from '../../../services/parser.service.js';
 import { renderCodeHtml, renderCodeRowsHtml } from '../../../services/render.service.js';
-import { writesWholeFile } from '../../../services/artifact-type-config.service.js';
+import { writesWholeFile, isTerminalOnly } from '../../../services/artifact-type-config.service.js';
 import { patchFrontmatterField, patchVarDefaults, type BlockRef } from '../../../services/artifact-patcher.service.js';
 import { PreviewModeController, type SectionKey } from '../../../services/preview-mode.service.js';
 import { getNonce } from '../../../utils/helpers.js';
 import type { ParsedArtifactFile } from '../../../types/parsed-artifact.types.js';
 import { out } from './shared.js';
-import { performInsert, persistBlockCode, sanitiseVarsSnapshot, type InvocationSurface } from './preview.helpers.js';
+import { performInsert, persistBlockCode, sanitiseVarsSnapshot, hasVisibleEditor, type InvocationSurface } from './preview.helpers.js';
 import { confirmModal } from '../../../services/confirm.service.js';
 import type { WebviewHost, HostMessage } from './webviewHost.js';
 import type { MainViewPreviewState } from '../../views/mainView.preview.js';
@@ -133,6 +133,16 @@ export class PreviewPanelController {
      */
     private stagedCode: string | undefined;
 
+    /**
+     * Watches for editor tabs opening/closing while a preview is open, so
+     * Insert can appear the moment there is somewhere to insert into.
+     *
+     * `visibleTextEditors`, not `activeTextEditor`: the latter goes `undefined`
+     * whenever a webview takes focus, which would hide Insert exactly while the
+     * user is working in this pane. Disposed in `dispose()` beside `msgSub`.
+     */
+    private editorsSub: vscode.Disposable | undefined;
+
     constructor(private readonly cb: PreviewCallbacks) {
         this.blockEdit = new BlockEditController({
             rootFs:              cb.rootFs,
@@ -193,6 +203,30 @@ export class PreviewPanelController {
         await this.cb.ensureView();
     }
 
+    /**
+     * Keeps the pane's Insert button in step with whether an editor tab exists.
+     *
+     * The initial state is rendered into the HTML; this only handles the tabs
+     * opening or closing *while* the preview is up. Posting through the host
+     * means a hidden pane queues the message rather than dropping it (H1).
+     *
+     * @example
+     * this.watchEditorAvailability(); // after showPreviewState
+     */
+    private watchEditorAvailability(): void {
+        this.editorsSub?.dispose();
+        const type = this.currentArtifact?.frontmatter.artifactType;
+        // Only editor-bound types are gated, and the decision lives here rather
+        // than as a marker attribute in the markup: the extension already knows
+        // the type, so shipping a flag into the webview would be a second copy
+        // of the same rule. A whole-file type writes into the workspace and a
+        // terminal-bound type sends to the terminal — neither needs an editor.
+        if (!type || writesWholeFile(type) || isTerminalOnly(type)) { return; }
+        this.editorsSub = vscode.window.onDidChangeVisibleTextEditors(() => {
+            this.postToWebview({ command: 'setInsertAvailable', value: hasVisibleEditor() });
+        });
+    }
+
     /** Ends the preview session and returns the pane to `idle`. */
     dispose(): void {
         if (!this.open) { return; }
@@ -207,6 +241,8 @@ export class PreviewPanelController {
         void this.blockEdit.teardown();
         this.msgSub?.dispose();
         this.msgSub          = undefined;
+        this.editorsSub?.dispose();
+        this.editorsSub      = undefined;
         this.modeController  = undefined;
         this.currentArtifact = undefined;
         this.batch.settle({ kind: 'aborted' });  // no-op unless still armed (D5)
@@ -262,8 +298,12 @@ export class PreviewPanelController {
         this.claimTarget();
 
         const varSources = this.modeController?.getAllVarSources() ?? {};
-        this.cb.showPreviewState({ kind: 'single', artifact, varSources });
+        this.cb.showPreviewState({
+            kind: 'single', artifact, varSources,
+            insertAvailable: hasVisibleEditor(),
+        });
         this.setupMessageHandler();
+        this.watchEditorAvailability();
         this.postVarsHeight();
         void this.paneWidth.widenForPreview();
         out.appendLine(`[pane] preview → ${artifact.fileName}`);

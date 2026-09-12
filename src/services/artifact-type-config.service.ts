@@ -189,6 +189,33 @@ export function writesWholeFile(type: ArtifactType): boolean {
 }
 
 /**
+ * Answers whether a type can *only* ever insert into the terminal.
+ *
+ * The narrow question the preview renderer needs: may Insert be hidden when no
+ * editor tab is open? A `contexts: ['terminal']` row (only `Command` today)
+ * always routes to the terminal — `resolveInsertTarget`'s first rule — so
+ * gating its button on an editor would make it uninsertable.
+ *
+ * Deliberately *not* `resolveInsertTarget`: that resolver needs an
+ * `InvocationSurface` the renderer does not have, and a both-context type
+ * (`AIPrompt`) can still land in an editor, so it must stay gated. Reads
+ * `contexts` through `getEntry`, never a second `ARTIFACTS` traversal.
+ *
+ * @param type - Canonical `ArtifactType` literal.
+ * @returns `true` when `contexts` is exactly `['terminal']`; `false` otherwise.
+ * @throws When the type is unknown (via `getEntry`).
+ *
+ * @example
+ * isTerminalOnly('Command');  // → true
+ * isTerminalOnly('AIPrompt'); // → false — declares both, can land in an editor
+ * isTerminalOnly('Snippet');  // → false
+ */
+export function isTerminalOnly(type: ArtifactType): boolean {
+    const { contexts } = getEntry(type);
+    return contexts.length === 1 && contexts[0] === 'terminal';
+}
+
+/**
  * Names the `ArtifactFormModel` key that supplies a type's output filename,
  * or `undefined` for the types that do not write a whole file.
  *

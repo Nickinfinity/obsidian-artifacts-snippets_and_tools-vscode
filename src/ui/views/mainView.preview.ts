@@ -79,7 +79,7 @@ export async function ensureView(target: ViewTarget): Promise<void> {
  */
 export type MainViewPreviewState =
     | { kind: 'empty' }
-    | { kind: 'single'; artifact: ParsedArtifactFile; varSources?: Record<string, string> }
+    | { kind: 'single'; artifact: ParsedArtifactFile; varSources?: Record<string, string>; insertAvailable?: boolean }
     | { kind: 'multi'; artifact: ParsedArtifactFile };
 
 /**
@@ -132,5 +132,8 @@ export function renderMainViewPreviewHtml(
         return renderMultiBlockPreviewHtml(state.artifact, highlightedBlocks, cssUri, cspSource);
     }
     const codeRowsHtml = renderCodeRowsHtml(state.artifact.code, state.artifact.frontmatter.language);
-    return renderPreviewHtml(state.artifact, codeRowsHtml, nonce, cssUri, cspSource, state.varSources ?? {});
+    return renderPreviewHtml(
+        state.artifact, codeRowsHtml, nonce, cssUri, cspSource,
+        state.varSources ?? {}, state.insertAvailable ?? true,
+    );
 }

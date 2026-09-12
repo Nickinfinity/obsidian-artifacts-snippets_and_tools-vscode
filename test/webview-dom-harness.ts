@@ -53,6 +53,21 @@ export class ElementStub {
     ownText = '';
     private _hidden = false;
     checked = false;
+    /**
+     * Minimal Node surface so `CODE_BLOCK_CLIENT_JS`'s caret restore can walk this
+     * tree without throwing. `placeCaret` recurses `node.childNodes` looking for a
+     * `nodeType === 3` text node; this stub models elements only, so it reports
+     * ELEMENT_NODE with no children and `walk` falls straight through to the
+     * `range.selectNodeContents(el)` branch that `createRange` already stubs.
+     *
+     * Needed because the harness passes REAL timers, so the debounced
+     * `scheduleRender` fires ~150ms after an `input` — typically after the test
+     * that fired it has finished, landing any throw as an uncaught exception
+     * attributed to whatever suite is running then.
+     */
+    readonly nodeType = 1;
+    readonly length = 0;
+    get childNodes(): ElementStub[] { return this.children; }
     style: { setProperty: (name: string, val: string) => void; display: string } = {
         setProperty: () => { /* not asserted */ },
         display: '',
@@ -402,7 +417,18 @@ export function makeWebviewDom(opts: { seedHtml: string; script: string; state?:
             arr.push(fn);
             winListeners.set(type, arr);
         },
-        getSelection: () => ({ removeAllRanges: () => { /* stub */ }, addRange: () => { /* stub */ } }),
+        // `getRangeAt`/`rangeCount` included because the harness passes REAL timers
+        // (`:423`), so `CODE_BLOCK_CLIENT_JS`'s debounced `scheduleRender` actually
+        // fires ~150ms after an `input` — by which time the test that fired it has
+        // usually finished, landing the throw as an uncaught exception attributed
+        // to whatever suite happens to be running. `rangeCount: 0` makes
+        // `getCaretOffset` take its documented early-return instead.
+        getSelection: () => ({
+            rangeCount: 0,
+            getRangeAt: () => null,
+            removeAllRanges: () => { /* stub */ },
+            addRange: () => { /* stub */ },
+        }),
         getComputedStyle: () => ({ getPropertyValue: () => '' }),
         innerWidth: 300,
         innerHeight: 600,

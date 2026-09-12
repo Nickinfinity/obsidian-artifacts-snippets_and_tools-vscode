@@ -141,6 +141,62 @@ suite('mainView idle pane — client script behaviour', () => {
         assert.ok(HTML.includes(IDLE_CLIENT_JS));
     });
 
+    // ── Filter clear button ─────────────────────────────────────────────────
+    suite('the filter clear button', () => {
+
+        test('clicking it empties the input and restores every row of the current mode', () => {
+            const dom = makeIdleDom();
+            setFilter(dom, 'sn');
+            // Precondition, not decoration: without it a clear button that does
+            // nothing would still pass the post-click assertion below, because
+            // the unfiltered list is also the full list.
+            assert.deepStrictEqual(visibleRowLabels(dom), ['Snippets'], 'precondition: the filter did not narrow');
+
+            const clearBtn = dom.el('#idleFilterClear');
+            assert.ok(clearBtn, '#idleFilterClear must exist');
+            dom.fire(clearBtn!, 'click');
+
+            assert.strictEqual(dom.el('#idleFilter')?.value, '', 'the clear button did not empty the input');
+            assert.deepStrictEqual(
+                visibleRowLabels(dom),
+                ['Snippets', 'AI Agents Config', 'Commands', 'Templates', 'AI Prompts'],
+                'the clear button emptied the input without re-running the filter',
+            );
+        });
+
+        test('it stays out of the way of Open mode — clearing keeps the active mode', () => {
+            const dom = makeIdleDom();
+            clickToggle(dom, 'open');
+            setFilter(dom, 'sn');
+            // Asserted, not assumed: `dom.fire(null, …)` no-ops in the harness, so
+            // without this the whole test passes against a pane where nothing was
+            // ever clicked — green, and incapable of failing for its own reason.
+            const clearBtn = dom.el('#idleFilterClear');
+            assert.ok(clearBtn, '#idleFilterClear must exist in Open mode too');
+            dom.fire(clearBtn!, 'click');
+
+            // Still Open: a clear that reset the mode would show the New rows,
+            // and a row click would post createType instead of browseType.
+            clickRow(dom, 'Snippets');
+            assert.deepStrictEqual(
+                lastPosted(dom),
+                { command: 'browseType', type: 'Snippet' },
+                'clearing the filter dropped the active mode back to New',
+            );
+        });
+
+        test('clearing persists the emptied query, so a reload does not resurrect it', () => {
+            const dom = makeIdleDom();
+            setFilter(dom, 'sn');
+            const clearBtn = dom.el('#idleFilterClear');
+            assert.ok(clearBtn, '#idleFilterClear must exist');
+            dom.fire(clearBtn!, 'click');
+
+            const last = dom.stateWrites.at(-1) as { query?: unknown } | undefined;
+            assert.strictEqual(last?.query, '', 'the cleared query was never persisted');
+        });
+    });
+
     // ── Security: hostile persisted state ───────────────────────────────────
     suite('hostile getState() payload', () => {
         test('an unrecognised persisted mode falls back to new rather than being assigned through', () => {

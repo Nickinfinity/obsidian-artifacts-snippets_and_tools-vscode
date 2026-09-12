@@ -182,7 +182,12 @@ ${styleLinkTags(cssUris)}
 </style>
 </head>
 <body class="popup-body">
-  <input type="text" id="idleFilter" aria-label="Filter artifact types" placeholder="Filter…">
+  <div class="idle-filter-wrap">
+    <input type="text" id="idleFilter" aria-label="Filter artifact types" placeholder="Filter…">
+    <button type="button" id="idleFilterClear" aria-label="Clear filter" title="Clear filter" hidden>
+      <span class="codicon codicon-close" aria-hidden="true"></span>
+    </button>
+  </div>
   <div class="idle-toggle" role="group">
     <button type="button" class="idle-toggle-btn is-active" data-mode="new" aria-pressed="true">New</button>
     <button type="button" class="idle-toggle-btn" data-mode="open" aria-pressed="false">Open</button>
@@ -255,6 +260,7 @@ function renderRows(items: CreateItem[], action: string, icon: string, startHidd
 export const IDLE_CLIENT_JS = /* js */`
   var toggleBtns = document.querySelectorAll('.idle-toggle-btn');
   var filterInput = document.getElementById('idleFilter');
+  var clearBtn = document.getElementById('idleFilterClear');
   var mode = 'new';
 
   function applyFilter() {
@@ -264,6 +270,11 @@ export const IDLE_CLIENT_JS = /* js */`
       var label = (row.textContent || '').toLowerCase();
       row.hidden = !(row.dataset.action === wantAction && label.indexOf(query) !== -1);
     });
+    // The clear affordance only exists while there is something to clear, so an
+    // empty filter shows no dead button. Driven from applyFilter rather than the
+    // input listener alone so every path that changes the query - typing, the
+    // toggle, and the getState() restore - agrees about the button's visibility.
+    if (clearBtn) { clearBtn.hidden = filterInput.value === ''; }
   }
 
   function setMode(next) {
@@ -287,6 +298,18 @@ export const IDLE_CLIENT_JS = /* js */`
     applyFilter();
     vscode.setState({ mode: mode, query: filterInput.value });
   });
+
+  if (clearBtn) {
+    clearBtn.addEventListener('click', function () {
+      filterInput.value = '';
+      applyFilter();
+      // Persist the emptied query, or a pane hide/reveal restores the filter the
+      // user just cleared - a WebviewView hide disposes the view, so getState()
+      // is the only thing that survives it.
+      vscode.setState({ mode: mode, query: '' });
+      filterInput.focus();
+    });
+  }
 
   document.querySelectorAll('.create-row[data-type]').forEach(function (el) {
     el.addEventListener('click', function () {

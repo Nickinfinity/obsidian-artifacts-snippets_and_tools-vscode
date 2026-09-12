@@ -57,17 +57,36 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
   // other.
   const dirtyNotice  = document.getElementById('dirtyNotice');
   const overwriteBtn = document.getElementById('overwriteBtn');
+  const codeArea = document.getElementById('codeWrapper');
 
+  // Reads the code area the way __codeBlock does, but survives the bridge not
+  // being there yet: this runs at load, and a guarded read keeps the whole
+  // script from dying on a page that renders no code block.
+  function readCode() {
+    if (window.__codeBlock) { return window.__codeBlock.extractCode(); }
+    return codeArea ? (codeArea.textContent || '') : '';
+  }
+
+  // The baseline Overwrite is judged against. Reassigned - never compared
+  // against a stale value - whenever the .md itself changes underneath us.
+  var baselineCode = readCode();
+
+  // A COMPARISON, not a notification. Bound to \`input\`, this used to reveal
+  // Overwrite for any event the code area emitted, so a programmatic re-render,
+  // a focus, or an IME could stage a file nobody had edited - and nothing ever
+  // re-hid it, so typing a character and deleting it left Overwrite offering to
+  // rewrite the bytes already on disk.
   function markStaged() {
-    if (dirtyNotice)  { dirtyNotice.hidden  = false; }
-    if (overwriteBtn) { overwriteBtn.hidden = false; }
+    var changed = readCode() !== baselineCode;
+    if (dirtyNotice)  { dirtyNotice.hidden  = !changed; }
+    if (overwriteBtn) { overwriteBtn.hidden = !changed; }
   }
   function clearStaged() {
+    baselineCode = readCode();
     if (dirtyNotice)  { dirtyNotice.hidden  = true; }
     if (overwriteBtn) { overwriteBtn.hidden = true; }
   }
 
-  const codeArea = document.getElementById('codeWrapper');
   if (codeArea) { codeArea.addEventListener('input', markStaged); }
 
   const expandBtn = document.getElementById('expandCodeBtn');
@@ -234,6 +253,11 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
     if (msg.command === 'updateVars')  { rebuildVarInputs(msg.vars); }
     if (msg.command === 'fileUpdated' && msg.artifact) {
       window.__codeBlock.setCode(msg.artifact.code || '');
+      // The .md changed on disk, so this is a new baseline, not an edit of the
+      // old one - without this, a file-driven update leaves Overwrite offering
+      // to write back exactly what was just read out of the file.
+      baselineCode = readCode();
+      markStaged();
       rebuildVarInputs(msg.artifact.vars);
     }
     if (msg.command === 'showVarSetDiff') { showDiffView(msg.html); }
@@ -245,6 +269,13 @@ export const PREVIEW_CLIENT_JS: string = `${CODE_BLOCK_CLIENT_JS}
       markStaged();
     }
     if (msg.command === 'overwriteDone') { clearStaged(); }
+    // An editor tab opened or closed while this preview was up. The extension
+    // only sends this for types that actually need an editor - a whole-file or
+    // terminal-bound type never gets one - so the webview just reflects it.
+    if (msg.command === 'setInsertAvailable') {
+      var insertBtn = document.getElementById('insertBtn');
+      if (insertBtn) { insertBtn.hidden = !msg.value; }
+    }
     // Authoritative height from the extension (config, already clamped).
     if (msg.command === 'setVarsHeight' && msg.value) {
       document.documentElement.style.setProperty('--oa-vars-height', msg.value);
