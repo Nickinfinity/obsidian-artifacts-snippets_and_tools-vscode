@@ -15,8 +15,10 @@ import { PREVIEW_CLIENT_JS } from '../src/ui/panels/artifactPicker/preview.clien
  * `test/` entirely.
  *
  * Deliberately small: only the selectors and DOM operations the preview and
- * (later) idle-pane client scripts actually use are supported —
- * `#id`, `.class`, `[attr]`, `[attr="value"]`. It is not a browser.
+ * idle-pane client scripts actually use are supported — `#id`, `.class`,
+ * `[attr]`, `[attr="value"]`, and the one compound form `.class[attr]...`
+ * (a class plus one or more bracket clauses, e.g. `.create-row[data-type]`).
+ * It is not a browser.
  */
 
 // ── Internal element model ──────────────────────────────────────────────────
@@ -46,8 +48,10 @@ export class ElementStub {
     children: ElementStub[] = [];
     parentElement: ElementStub | null = null;
     value: string;
-    textContent = '';
-    hidden = false;
+    /** This element's own direct text runs (not descendants') — set at parse time by
+     * `appendText`. `textContent` (below) is the real-DOM-matching recursive getter. */
+    ownText = '';
+    private _hidden = false;
     checked = false;
     style: { setProperty: (name: string, val: string) => void; display: string } = {
         setProperty: () => { /* not asserted */ },
@@ -62,6 +66,11 @@ export class ElementStub {
         private readonly registry: Map<string, ElementStub>,
     ) {
         this.value = attrs.value ?? '';
+        // `hidden` ships as a bare boolean attribute (`hidden` present/absent) —
+        // reflect it into the property immediately, same reasoning as `style.display`
+        // below: a script that reads `.hidden` before ever writing it must see the
+        // server-rendered state, not a stub default.
+        this._hidden = 'hidden' in attrs;
         // A real DOM reflects a seeded `style="display:none;"` attribute into
         // `.style.display` immediately — this stub didn't (Finding #25), so a
         // restore round-trip reported a hidden button as visible.
@@ -78,10 +87,33 @@ export class ElementStub {
         });
     }
 
+    /** Real-DOM-matching: recursive over descendants, own text runs included, matching
+     * the property `IDLE_CLIENT_JS` reads off a row whose label lives in a child `span`. */
+    get textContent(): string {
+        return this.ownText + this.children.map((c) => c.textContent).join('');
+    }
+    set textContent(v: string) {
+        unregisterSubtree(this.children, this.registry);
+        this.children = [];
+        this.ownText = v;
+    }
+
     get id(): string { return this.attrs.id ?? ''; }
 
     get className(): string { return this.attrs.class ?? ''; }
     set className(v: string) { this.attrs.class = v; }
+
+    /** Attribute↔property pair: the markup ships `hidden` as a bare attribute,
+     * `IDLE_CLIENT_JS` writes `.hidden` — both directions must agree, or a test
+     * reading the attribute after a script write sees stale markup. */
+    get hidden(): boolean { return this._hidden; }
+    set hidden(v: boolean) {
+        this._hidden = v;
+        if (v) { this.attrs.hidden = ''; } else { delete this.attrs.hidden; }
+    }
+
+    getAttribute(name: string): string | null { return name in this.attrs ? this.attrs[name] : null; }
+    setAttribute(name: string, value: string): void { this.attrs[name] = value; }
 
     get classList(): { contains(c: string): boolean; add(c: string): void; remove(c: string): void } {
         const self = this;
@@ -163,22 +195,41 @@ function parseAttrs(raw: string): Record<string, string> {
     return attrs;
 }
 
-/** Parses an HTML fragment into a fresh (identity-new) element tree, registering ids. */
+/** Appends a text run to the currently-open element's own text, if any is open. */
+function appendText(stack: ElementStub[], text: string): void {
+    if (!text || stack.length === 0) { return; }
+    stack.at(-1)!.ownText += text;
+}
+
+/** Pops `stack` when a closing tag matches the currently-open element. */
+function closeTag(stack: ElementStub[], tag: string): void {
+    if (stack.length > 0 && stack.at(-1)!.tagName === tag) { stack.pop(); }
+}
+
+/** Parses an HTML fragment into a fresh (identity-new) element tree, registering ids.
+ * Plain text between tags becomes the currently-open element's `ownText` (`:53`) — this
+ * element's own direct text runs only, not a recursive join. `textContent` (`:92-94`)
+ * is the separate, real-DOM-matching getter that joins `ownText` plus every descendant's
+ * `textContent` recursively — so a row whose label lives in a child `span` still reads
+ * back correctly through `.textContent` even though `ownText` itself stays leaf-local. */
 function parseFragment(html: string, parent: ElementStub, registry: Map<string, ElementStub>): ElementStub[] {
     const result: ElementStub[] = [];
     const stack: ElementStub[] = [];
     const tagRe = /<(\/)?([a-zA-Z][\w-]*)([^<>]*)>/g;
     let m: RegExpExecArray | null;
+    let lastIndex = 0;
     while ((m = tagRe.exec(html)) !== null) {
+        appendText(stack, html.slice(lastIndex, m.index));
+        lastIndex = tagRe.lastIndex;
         const [, closing, rawTag, rest] = m;
         const tag = rawTag.toLowerCase();
         if (closing) {
-            if (stack.length && stack[stack.length - 1].tagName === tag) { stack.pop(); }
+            closeTag(stack, tag);
             continue;
         }
         const el = new ElementStub(tag, parseAttrs(rest), registry);
-        el.parentElement = stack.length ? stack[stack.length - 1] : parent;
-        const container = stack.length ? stack[stack.length - 1].children : result;
+        el.parentElement = stack.length ? stack.at(-1)! : parent;
+        const container = stack.length ? stack.at(-1)!.children : result;
         container.push(el);
         if (el.id) { registry.set(el.id, el); }
         const selfClosing = rest.trimEnd().endsWith('/') || VOID_TAGS.has(tag);
@@ -206,17 +257,36 @@ function unregisterSubtree(nodes: ElementStub[], registry: Map<string, ElementSt
     }
 }
 
-/** The four selector forms the client scripts use: `#id`, `.class`, `[attr]`, `[attr="value"]`. */
+/** Tests one bracket clause (`[attr]` or `[attr="value"]`) against an element. */
+function matchesAttrClause(el: ElementStub, clause: string): boolean {
+    const m = /^\[([-\w:.]+)(?:="([^"]*)")?]$/.exec(clause);
+    if (!m) { return false; }
+    const [, name, value] = m;
+    if (!(name in el.attrs)) { return false; }
+    return value === undefined ? true : el.attrs[name] === value;
+}
+
+/**
+ * The selector forms the client scripts use: `#id`, `.class`, `[attr]`, `[attr="value"]`,
+ * plus the one compound form `IDLE_CLIENT_JS` needs — a class followed by one or more
+ * bracket clauses (`.create-row[data-type]`). A class-only or bracket-only selector still
+ * takes the single-form branch unchanged, so every existing caller (W1's `#varInputs`,
+ * `[data-var="VK-host"]`, `#varSetApplyBtn`) matches exactly as before.
+ *
+ * @example
+ * matches(row, '.create-row[data-type]')  // → true only with BOTH the class and the attr
+ */
 function matches(el: ElementStub, selector: string): boolean {
     if (selector.startsWith('#')) { return el.id === selector.slice(1); }
-    if (selector.startsWith('.')) { return el.classList.contains(selector.slice(1)); }
-    const m = /^\[([-\w:.]+)(?:="([^"]*)")?]$/.exec(selector);
-    if (m) {
-        const [, name, value] = m;
-        if (!(name in el.attrs)) { return false; }
-        return value === undefined ? true : el.attrs[name] === value;
-    }
-    return false;
+    if (!selector.startsWith('.')) { return matchesAttrClause(el, selector); }
+    const bracketStart = selector.indexOf('[');
+    if (bracketStart === -1) { return el.classList.contains(selector.slice(1)); }
+    const className = selector.slice(1, bracketStart);
+    const clauseRe = /\[[^[\]]*]/g;
+    const clauses: string[] = [];
+    let cm: RegExpExecArray | null;
+    while ((cm = clauseRe.exec(selector)) !== null) { clauses.push(cm[0]); }
+    return el.classList.contains(className) && clauses.every((c) => matchesAttrClause(el, c));
 }
 
 function findFirst(node: ElementStub, sel: string): ElementStub | null {
@@ -269,12 +339,19 @@ function permissiveStub(): Record<string, unknown> {
 export interface WebviewDom {
     /** Looks up the current live element for a selector (`#id`, `.class`, `[attr]`, `[attr="value"]`) — `null` if absent, so a test's `.value`/`.textContent`/`.classList` read needs no call-site cast. */
     el(selector: string): ElementStub | null;
+    /** Every live element matching a selector, in document order — the harness's
+     * `document.querySelectorAll`, exposed so a test can assert a *count* or *membership*
+     * across all matches rather than only the first (`el` picks first-in-document-order,
+     * which cannot prove a negative when several elements share a selector). */
+    all(selector: string): ElementStub[];
     /** Dispatches a DOM event at `target`, bubbling through `parentElement` — supports delegated listeners. */
     fire(target: unknown, type: string): void;
     /** Delivers a `window.addEventListener('message', ...)` event, as the extension host would post one. */
     dispatch(message: Record<string, unknown>): void;
     /** Every `vscode.postMessage(...)` call the script made, in order. */
     posted: Array<Record<string, unknown>>;
+    /** Every `vscode.setState(...)` call the script made, in order — proves persistence happened without needing a real dispose/reload round-trip. */
+    stateWrites: unknown[];
 }
 
 /**
@@ -283,13 +360,17 @@ export interface WebviewDom {
  * @param opts.seedHtml - Initial markup; every id the script dereferences unguarded at
  *   load must be present here or the script throws during setup.
  * @param opts.script   - Client-JS bundle (e.g. `PREVIEW_CLIENT_JS`).
+ * @param opts.state    - Optional — what `vscode.getState()` returns, simulating a
+ *   persisted-state seed from a prior session. Optional because W1 reaches this harness
+ *   exclusively through `makePreviewDom()`, which passes no `state`; a mandatory field
+ *   would break that preset.
  * @returns A `WebviewDom` handle for driving and inspecting the running script.
  *
  * @example
  * const dom = makeWebviewDom({ seedHtml: '<button id="x"></button>', script: '...' });
  * dom.fire(dom.el('#x'), 'click');
  */
-export function makeWebviewDom(opts: { seedHtml: string; script: string }): WebviewDom {
+export function makeWebviewDom(opts: { seedHtml: string; script: string; state?: { mode?: unknown; query?: unknown } }): WebviewDom {
     const registry = new Map<string, ElementStub>();
     const root = new ElementStub('root', {}, registry);
     root.children = parseFragment(opts.seedHtml, root, registry);
@@ -329,10 +410,11 @@ export function makeWebviewDom(opts: { seedHtml: string; script: string }): Webv
         clipboardData: { getData: () => '' },
     };
 
+    const stateWrites: unknown[] = [];
     const vscode = {
         postMessage: (m: Record<string, unknown>): void => { posted.push(m); },
-        getState: () => undefined,
-        setState: () => { /* stub */ },
+        getState: (): unknown => opts.state,
+        setState: (s: unknown): void => { stateWrites.push(s); },
     };
 
     // eslint-disable-next-line @typescript-eslint/no-implied-eval
@@ -342,6 +424,7 @@ export function makeWebviewDom(opts: { seedHtml: string; script: string }): Webv
 
     return {
         el: (selector: string): ElementStub | null => (selector.startsWith('#') ? registry.get(selector.slice(1)) ?? null : findFirst(root, selector)),
+        all: (selector: string): ElementStub[] => findAll(root, selector),
         fire: (target: unknown, type: string): void => {
             if (!target) { return; }
             const event: SyntheticEvent = { type, target: target as ElementStub };
@@ -355,6 +438,7 @@ export function makeWebviewDom(opts: { seedHtml: string; script: string }): Webv
             for (const listener of winListeners.get('message') ?? []) { listener({ data: message }); }
         },
         posted,
+        stateWrites,
     };
 }
 

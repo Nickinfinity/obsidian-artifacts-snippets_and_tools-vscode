@@ -214,6 +214,51 @@ export function getFilenameField(type: ArtifactType): 'target' | 'extension' | u
 }
 
 /**
+ * Reports whether picking this artifact type opens it in an **editable** view
+ * instead of the insert preview (D-11).
+ *
+ * `Variables` is the only such type today: its files are variable-set
+ * definitions the user edits, not payloads inserted at a cursor.
+ *
+ * **Derived from `ARTIFACTS.opensForEdit`, never a type-literal check** — the
+ * same rule `writesWholeFile` follows, for the same reason. A hardcoded
+ * `type === 'Variables'` is the enumeration that drifts the moment a second
+ * editable type appears.
+ *
+ * @param type - Canonical `ArtifactType` literal.
+ * @returns `true` when the type opens for edit; `false` when it inserts.
+ * @throws When the type is unknown (via `getEntry`).
+ *
+ * @example
+ * opensForEdit('Variables'); // → true
+ * opensForEdit('Snippet');   // → false
+ */
+export function opensForEdit(type: ArtifactType): boolean {
+    return getEntry(type).opensForEdit === true;
+}
+
+/**
+ * Returns the types that surface in the main pane's **Open** (browse) list —
+ * every type except those that open for edit.
+ *
+ * The counterpart to `getCreateFormTypes()` for the browse half of the pane,
+ * and the gate `resolveBrowseCommandId` checks: a row can never be clickable
+ * in that list without also being a valid browse target, because both derive
+ * from this one call.
+ *
+ * Built from `getAllTypes()` minus `opensForEdit`, so a new editable type is a
+ * `constants.ts` flag and nothing else — never a second list to maintain here.
+ *
+ * @returns Array of browsable `ArtifactType` literals, in `ARTIFACTS` order.
+ *
+ * @example
+ * getBrowseTypes(); // → ['Snippet', 'AIAgentsConfig', 'Command', 'Template', 'AIPrompt']
+ */
+export function getBrowseTypes(): ArtifactType[] {
+    return getAllTypes().filter(type => !opensForEdit(type));
+}
+
+/**
  * Reports whether a type is restricted to a single code block (D1).
  *
  * Derived from the same `form.multiBlock` flag `canMultiBlock` reads, but

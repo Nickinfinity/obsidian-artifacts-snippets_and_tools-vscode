@@ -89,6 +89,11 @@ export const ARTIFACTS: ArtifactsArray = [
 		dir: 'Variables',
 		default: false,
 		contexts: ['all'],
+		// D-11 — a Variables file opens in an editable view, never the insert
+		// preview. This one flag drives both halves: the main pane's Open list
+		// omits it (`getBrowseTypes`) and the picker routes it to the pane's
+		// edit mode (`opensForEdit`), so the list and the routing cannot drift.
+		opensForEdit: true,
 	},
 	{
 		type: 'AIPrompt',

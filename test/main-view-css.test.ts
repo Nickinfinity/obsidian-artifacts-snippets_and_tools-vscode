@@ -6,9 +6,10 @@ import * as path from 'node:path';
  * Guards T22's narrow-pane sheet (VSX-223).
  *
  * The file-existence check is the actual gate: it fails until
- * `src/ui/main-view.css` exists, and it is what makes
- * `npx vsce ls --no-dependencies | grep -E 'src/ui/.*\.(css|ttf)'` print 10
- * matched lines instead of 9 (see CLAUDE.md's packaging check — the
+ * `src/ui/main-view.css` exists, and it is one of the sheets that makes
+ * `npx vsce ls --no-dependencies | grep -E 'src/ui/.*\.(css|ttf)'` print 11
+ * matched lines (W3 added `main-pane.css`, taking it from 10 — measured with
+ * the tool, not derived; see CLAUDE.md's packaging check — the
  * `(css|ttf)` form is canonical: a sheet-only grep can't see a missing
  * `codicon.ttf`, which ships a pane of tofu boxes with no error).
  *

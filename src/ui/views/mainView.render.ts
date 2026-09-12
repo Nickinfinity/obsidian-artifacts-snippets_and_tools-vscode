@@ -1,4 +1,4 @@
-import { getCreateFormTypes, getAllTypes, getEntry } from '../../services/artifact-type-config.service.js';
+import { getCreateFormTypes, getBrowseTypes, getEntry } from '../../services/artifact-type-config.service.js';
 import { escHtml, styleLinkTags } from '../../utils/html.js';
 // THE create-id scheme — same authority insert.command.ts's artifactCommandId is
 // for insert. Constructing the id inline here would be a second spelling.
@@ -16,7 +16,8 @@ export const SETTINGS_COMMAND_ID = 'obsidian-artifacts.settings';
 export interface CreateItem {
     /** Canonical artifact type this row creates. */
     type: ArtifactType;
-    /** Row label — literal `Create ` prefix + `getEntry(type).name`. */
+    /** Row label — bare `getEntry(type).name`, no verb prefix (D-9): the New/Open
+     * toggle carries the verb, so New and Open render the same five labels. */
     label: string;
 }
 
@@ -33,10 +34,10 @@ export interface CreateItem {
  * @returns One `CreateItem` per create-form-enabled type, in `ARTIFACTS` order.
  *
  * @example
- * buildCreateItems()[0] // → { type: 'Snippet', label: 'Create Snippets' }
+ * buildCreateItems()[0] // → { type: 'Snippet', label: 'Snippets' }
  */
 export function buildCreateItems(): CreateItem[] {
-    return getCreateFormTypes().map(type => ({ type, label: `Create ${getEntry(type).name}` }));
+    return getCreateFormTypes().map(type => ({ type, label: getEntry(type).name }));
 }
 
 /**
@@ -67,38 +68,41 @@ export function resolveCreateCommandId(type: string): string | undefined {
 }
 
 /**
- * Builds the idle-mode "browse" row data — one row per artifact type.
+ * Builds the idle-mode "browse" row data — one row per browsable artifact type.
  *
- * Every type is browsable (unlike create, which only some types support), so
- * this reads `getAllTypes()` rather than `getCreateFormTypes()`. Membership
- * still comes from `ARTIFACTS`, so a new type appears here with no edit.
+ * Reads `getBrowseTypes()` (H3.0) rather than `getAllTypes()`: `Variables`
+ * opens straight into edit mode (D-11), so it is excluded from Open the same
+ * way it is excluded from New. Membership still comes from `ARTIFACTS`, so a
+ * new browsable type appears here with no edit.
  *
- * @returns One `CreateItem` per artifact type, in `ARTIFACTS` order.
+ * @returns One `CreateItem` per browsable type, in `ARTIFACTS` order.
  *
  * @example
  * buildBrowseItems()[0] // → { type: 'Snippet', label: 'Snippets' }
  */
 export function buildBrowseItems(): CreateItem[] {
-    return getAllTypes().map(type => ({ type, label: getEntry(type).name }));
+    return getBrowseTypes().map(type => ({ type, label: getEntry(type).name }));
 }
 
 /**
  * Resolves the insert/browse command id for a `browseType` webview message.
  *
- * Gated against `getAllTypes()` for the same reason `resolveCreateCommandId`
+ * Gated against `getBrowseTypes()` for the same reason `resolveCreateCommandId`
  * gates against `getCreateFormTypes()`: `type` crosses the webview boundary
  * untrusted, and an ungated value would build an `obsidian-artifacts.insert.*`
- * id that was never registered.
+ * id that was never registered — and `Variables` (D-11) must never resolve
+ * here, since Open never renders it.
  *
  * @param type - Raw `type` value from a `{ command: 'browseType', type }` message.
- * @returns `obsidian-artifacts.insert.<dir>` for a known type, else `undefined`.
+ * @returns `obsidian-artifacts.insert.<dir>` for a browsable type, else `undefined`.
  *
  * @example
- * resolveBrowseCommandId('Snippet')  // → 'obsidian-artifacts.insert.snippets'
- * resolveBrowseCommandId('Nonsense') // → undefined
+ * resolveBrowseCommandId('Snippet')    // → 'obsidian-artifacts.insert.snippets'
+ * resolveBrowseCommandId('Variables')  // → undefined — not a browse type (D-11)
+ * resolveBrowseCommandId('Nonsense')   // → undefined
  */
 export function resolveBrowseCommandId(type: string): string | undefined {
-    const known = getAllTypes().find(t => t === type);
+    const known = getBrowseTypes().find(t => t === type);
     if (!known) {
         return undefined;
     }
@@ -108,25 +112,29 @@ export function resolveBrowseCommandId(type: string): string | undefined {
 // ── HTML ─────────────────────────────────────────────────────────────────────
 
 /**
- * Renders the idle-mode webview HTML — one clickable row per create item.
+ * Renders the idle-mode webview HTML — a filterable list of rows behind a
+ * New/Open toggle, plus a pinned Settings row.
  *
- * Every interpolated value is escaped via `escHtml`. Clicking (or pressing
- * Enter/Space on) a row posts `{ command: 'createType', type }` to the
- * extension host.
+ * Every interpolated value is escaped via `escHtml`. New and Open render the
+ * same five labels (D-9 drops the `Create ` prefix so the toggle alone
+ * carries the verb); `IDLE_CLIENT_JS` hides whichever list the current mode
+ * and filter text do not match, and both lists ship the inactive one already
+ * `hidden` server-side so nothing double-renders before the script runs.
  *
- * Every row uses the same vendored codicon "add" glyph
+ * Every row uses the same vendored codicon glyph per section
  * (`Artifact.icon` is unpopulated by every `ARTIFACTS` entry today, so a
  * per-type icon branch would be five identical fallbacks dressed up as a
  * feature that does not exist).
  *
- * @param items     - Rows to render, from `buildCreateItems()`.
+ * @param items     - New-mode rows, from `buildCreateItems()`.
  * @param cssUris   - Webview URIs for the stylesheets — `base.css` first.
  * @param cspSource - Webview CSP source token (`webview.cspSource`).
  * @param nonce     - CSP nonce shared by the `<style>` and `<script>` tags.
+ * @param browseItems - Open-mode rows, from `buildBrowseItems()`.
  * @returns Complete HTML document string for `webview.html`.
  *
  * @example
- * renderIdleHtml(buildCreateItems(), [baseCssUri, codiconCssUri], webview.cspSource, getNonce())
+ * renderIdleHtml(buildCreateItems(), [baseCssUri, codiconCssUri], webview.cspSource, getNonce(), buildBrowseItems())
  */
 export function renderIdleHtml(
     items: CreateItem[],
@@ -135,11 +143,8 @@ export function renderIdleHtml(
     nonce: string,
     browseItems: CreateItem[] = [],
 ): string {
-    const rows = renderRows(items, 'createType', 'add');
-    const browseRows = renderRows(browseItems, 'browseType', 'search');
-    const browseSection = browseItems.length > 0
-        ? `<p class="pane-section-label">Open</p><div class="create-list">${browseRows}</div>`
-        : '';
+    const rows = renderRows(items, 'createType', 'add', false);
+    const browseRows = renderRows(browseItems, 'browseType', 'search', true);
 
     return /* html */`<!DOCTYPE html>
 <html lang="en">
@@ -177,9 +182,12 @@ ${styleLinkTags(cssUris)}
 </style>
 </head>
 <body class="popup-body">
-  <p class="pane-section-label">New</p>
-  <div class="create-list">${rows}</div>
-  ${browseSection}
+  <input type="text" id="idleFilter" aria-label="Filter artifact types" placeholder="Filter…">
+  <div class="idle-toggle" role="group">
+    <button type="button" class="idle-toggle-btn is-active" data-mode="new" aria-pressed="true">New</button>
+    <button type="button" class="idle-toggle-btn" data-mode="open" aria-pressed="false">Open</button>
+  </div>
+  <div class="create-list">${rows}${browseRows}</div>
   <div class="pane-spacer"></div>
   <div class="pane-footer">
     <button class="create-row" id="paneSettingsBtn">
@@ -190,17 +198,7 @@ ${styleLinkTags(cssUris)}
 <script nonce="${nonce}">
 (function () {
   const vscode = acquireVsCodeApi();
-  document.querySelectorAll('.create-row[data-type]').forEach(function (el) {
-    el.addEventListener('click', function () {
-      vscode.postMessage({ command: el.dataset.action, type: el.dataset.type });
-    });
-  });
-  const settingsBtn = document.getElementById('paneSettingsBtn');
-  if (settingsBtn) {
-    settingsBtn.addEventListener('click', function () {
-      vscode.postMessage({ command: 'openSettings' });
-    });
-  }
+  ${IDLE_CLIENT_JS}
 })();
 </script>
 </body>
@@ -212,20 +210,99 @@ ${styleLinkTags(cssUris)}
  *
  * The row carries its own `data-action`, so the click handler posts the right
  * command without a second `querySelectorAll` per section — one listener, one
- * message shape, whatever the section.
+ * message shape, whatever the section. `startHidden` renders the row already
+ * `hidden` server-side, so the inactive mode's rows never flash visible
+ * before `IDLE_CLIENT_JS` runs (or if it fails to load at all).
  *
- * @param items  - Rows to render.
- * @param action - Message `command` a click posts (`createType` / `browseType`).
- * @param icon   - Vendored codicon glyph name, without the `codicon-` prefix.
+ * @param items       - Rows to render.
+ * @param action      - Message `command` a click posts (`createType` / `browseType`).
+ * @param icon        - Vendored codicon glyph name, without the `codicon-` prefix.
+ * @param startHidden - Whether the row ships `hidden` in the markup (Open rows, on first load).
  * @returns The rows' HTML, every interpolation escaped.
  *
  * @example
- * renderRows(buildBrowseItems(), 'browseType', 'search')
+ * renderRows(buildBrowseItems(), 'browseType', 'search', true)
  */
-function renderRows(items: CreateItem[], action: string, icon: string): string {
+function renderRows(items: CreateItem[], action: string, icon: string, startHidden: boolean): string {
+    const hiddenAttr = startHidden ? ' hidden' : '';
     return items.map(item => `
-      <button class="create-row" data-type="${escHtml(item.type)}" data-action="${escHtml(action)}">
+      <button class="create-row" data-type="${escHtml(item.type)}" data-action="${escHtml(action)}"${hiddenAttr}>
         <span class="codicon codicon-${escHtml(icon)}" aria-hidden="true"></span>
         <span class="create-row-label">${escHtml(item.label)}</span>
       </button>`).join('');
 }
+
+/**
+ * Idle-pane client script — filter input, New/Open toggle, and the delegated
+ * row-click handler, concatenated inside the wrapper's own IIFE.
+ *
+ * Does **not** call `acquireVsCodeApi()` itself (only once per webview is
+ * legal): the wrapper declares `const vscode = acquireVsCodeApi();` before
+ * concatenating this constant, the same pattern `settings.panel.ts:339` uses
+ * for `MAIN_PANE_CLIENT_JS`.
+ *
+ * One predicate (`applyFilter`) recomputes every row's `hidden` on both a
+ * filter keystroke and a toggle click, so the two writers can never disagree
+ * about a row mid-session. `mode` and the filter query persist via
+ * `vscode.setState`/`getState` — `mode` is narrowed to the two known literals
+ * on read-back so a corrupted or hostile persisted value can never reach
+ * `dataset`/`classList`/`aria-pressed` un-validated, and the restored query
+ * is assigned only to `#idleFilter.value`, never through `innerHTML`.
+ *
+ * @example
+ * `<script nonce="${nonce}">const vscode = acquireVsCodeApi(); ${IDLE_CLIENT_JS}</script>`
+ */
+export const IDLE_CLIENT_JS = /* js */`
+  var toggleBtns = document.querySelectorAll('.idle-toggle-btn');
+  var filterInput = document.getElementById('idleFilter');
+  var mode = 'new';
+
+  function applyFilter() {
+    var query = (filterInput.value || '').toLowerCase();
+    var wantAction = mode === 'open' ? 'browseType' : 'createType';
+    document.querySelectorAll('.create-row[data-type]').forEach(function (row) {
+      var label = (row.textContent || '').toLowerCase();
+      row.hidden = !(row.dataset.action === wantAction && label.indexOf(query) !== -1);
+    });
+  }
+
+  function setMode(next) {
+    mode = next === 'open' ? 'open' : 'new';
+    toggleBtns.forEach(function (btn) {
+      var active = btn.dataset.mode === mode;
+      if (active) { btn.classList.add('is-active'); } else { btn.classList.remove('is-active'); }
+      btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+    });
+    applyFilter();
+    vscode.setState({ mode: mode, query: filterInput.value });
+  }
+
+  toggleBtns.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      setMode(btn.dataset.mode);
+    });
+  });
+
+  filterInput.addEventListener('input', function () {
+    applyFilter();
+    vscode.setState({ mode: mode, query: filterInput.value });
+  });
+
+  document.querySelectorAll('.create-row[data-type]').forEach(function (el) {
+    el.addEventListener('click', function () {
+      vscode.postMessage({ command: el.dataset.action, type: el.dataset.type });
+    });
+  });
+  var settingsBtn = document.getElementById('paneSettingsBtn');
+  if (settingsBtn) {
+    settingsBtn.addEventListener('click', function () {
+      vscode.postMessage({ command: 'openSettings' });
+    });
+  }
+
+  var restored = vscode.getState();
+  if (restored) {
+    filterInput.value = typeof restored.query === 'string' ? restored.query : '';
+    setMode(restored.mode);
+  }
+`;
